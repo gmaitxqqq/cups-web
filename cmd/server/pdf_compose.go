@@ -362,27 +362,16 @@ func collectPages(ctx context.Context, fileHeaders []*multipart.FileHeader, tmpD
 			if err != nil {
 				numPages = 1
 			}
-			// 修复未嵌入字体的 PDF（如发票金额）经 gofpdi 合成后文字丢失：
-			// 先用 Ghostscript 嵌入字体，再把产物拷进 tmpDir（随 collectPages 的
-			// 清理一并删除，不泄漏 GS 临时目录），gofpdi 导入的是已嵌字体的版本。
-			if normRes, nerr := normalizePDF(ctx, localPath); nerr == nil && normRes.Method != "passthrough" {
-				normCopy := filepath.Join(tmpDir, "normalized_"+itoa(idx)+".pdf")
-				if cErr := copyFile(normRes.OutputPath, normCopy); cErr == nil {
-					localPath = normCopy
-				}
-				normRes.Cleanup() // 无论是否拷成功都清理 GS 临时目录
+			// 统一用 Ghostscript 光栅化每页为高 DPI 图片（300DPI JPEG），
+			// 再由 placePageInSlot 以图片方式贴到合成版面。
+			// 彻底规避两个问题：
+			//   1) CJK 字体未嵌入（STSong-Light 等）→ pdf.js 预览空白/失败
+			//   2) GS pdfwrite 字体替换后度量不匹配 → 文字挤在一起/出框
+			imgPages, err := renderPDFToImages(ctx, localPath, numPages, tmpDir)
+			if err != nil {
+				return nil, fmt.Errorf("cannot process PDF %s: %w", fh.Filename, err)
 			}
-			if canGofpdiParse(localPath) {
-				for p := 1; p <= numPages; p++ {
-					pages = append(pages, composePage{pdfPath: localPath, pageNo: p})
-				}
-			} else {
-				imgPages, err := renderPDFToImages(ctx, localPath, numPages, tmpDir)
-				if err != nil {
-					return nil, fmt.Errorf("cannot process PDF %s: %w", fh.Filename, err)
-				}
-				pages = append(pages, imgPages...)
-			}
+			pages = append(pages, imgPages...)
 
 		case fileKindOFD:
 			outPath, cleanupConv, err := convertOFDToPDF(ctx, localPath)
