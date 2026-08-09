@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -423,44 +424,67 @@ const (
 	imageNormalizeJPEGQ  = 95   // JPEG 质量（高质量，接近无损）
 )
 
-// getPDFPageDimensions 用 gs bbox 设备获取 PDF 第一页的 MediaBox 尺寸（单位：pt）。
+// getPDFPageDimensions 获取 PDF 第一页的 MediaBox 尺寸（单位：pt）。
 // 返回 (widthPt, heightPt)。失败时回退为 A4 (595×842 pt)。
+//
+// 优先级：
+//  1. 直接从 PDF 文本流解析 /MediaBox（最精确，拿到的是物理页面尺寸）
+//  2. 退而求其次用 gs bbox 设备的"墨迹包围盒"（发票通常满框，约等于 MediaBox）
+//  3. 都失败则回退 A4
 func getPDFPageDimensions(inputPath string) (float64, float64) {
-	gsBin, err := exec.LookPath("gs")
-	if err != nil {
-		return 595, 842 // A4 fallback
+	// 1) PDF 明文 MediaBox（精确物理页面尺寸，优先）
+	if w, h, ok := parseMediaBoxFromPDF(inputPath); ok {
+		return w, h
 	}
-	tmpDir, _ := os.MkdirTemp("", "pdf-bbox-")
-	defer os.RemoveAll(tmpDir)
-	bboxOut := filepath.Join(tmpDir, "bbox.txt")
-	args := []string{
-		"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
-		"-sDEVICE=bbox",
-		"-sOutputFile=" + bboxOut,
-		inputPath,
+	// 2) gs bbox 墨迹盒兜底
+	if gsBin, err := exec.LookPath("gs"); err == nil {
+		args := []string{
+			"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
+			"-sDEVICE=bbox",
+			inputPath,
+		}
+		cmd := exec.Command(gsBin, args...)
+		cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
+		var buf bytes.Buffer
+		cmd.Stderr = &buf
+		cmd.Run() // 忽略错误，尽力解析 stderr
+		re := regexp.MustCompile(`HiResBoundingBox:\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)`)
+		if m := re.FindStringSubmatch(buf.String()); len(m) == 5 {
+			x0, _ := strconv.ParseFloat(m[1], 64)
+			y0, _ := strconv.ParseFloat(m[2], 64)
+			x1, _ := strconv.ParseFloat(m[3], 64)
+			y1, _ := strconv.ParseFloat(m[4], 64)
+			w := x1 - x0
+			h := y1 - y0
+			if w > 10 && h > 10 {
+				return w, h
+			}
+		}
 	}
-	cmd := exec.Command(gsBin, args...)
-	cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
-	cmd.Run() // ignore errors, try to parse output anyway
+	return 595, 842
+}
 
-	data, err := os.ReadFile(bboxOut)
+// parseMediaBoxFromPDF 从 PDF 文本流里直接找 /MediaBox 声明。
+// 对单页无压缩的发票 PDF 通常有效；失败返回 ok=false。
+func parseMediaBoxFromPDF(inputPath string) (float64, float64, bool) {
+	data, err := os.ReadFile(inputPath)
 	if err != nil {
-		return 595, 842
+		return 0, 0, false
 	}
-	// 解析 %%HiResBoundingBox: x0 y0 x1 y1
-	re := regexp.MustCompile(`HiResBoundingBox:\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)`)
-	matches := re.FindStringSubmatch(string(data))
-	if len(matches) != 5 {
-		return 595, 842
+	// 匹配 /MediaBox [x0 y0 x1 y1]（可能跨行）
+	re := regexp.MustCompile(`/MediaBox\s*\[\s*([\-?\d.]+)\s+([\-?\d.]+)\s+([\-?\d.]+)\s+([\-?\d.]+)\s*\]`)
+	m := re.FindStringSubmatch(string(data))
+	if len(m) != 5 {
+		return 0, 0, false
 	}
-	x0, _ := strconv.ParseFloat(matches[1], 64)
-	y0, _ := strconv.ParseFloat(matches[2], 64)
-	x1, _ := strconv.ParseFloat(matches[3], 64)
-	y1, _ := strconv.ParseFloat(matches[4], 64)
+	x0, _ := strconv.ParseFloat(m[1], 64)
+	y0, _ := strconv.ParseFloat(m[2], 64)
+	x1, _ := strconv.ParseFloat(m[3], 64)
+	y1, _ := strconv.ParseFloat(m[4], 64)
 	w := x1 - x0
 	h := y1 - y0
-	if w < 1 || h < 1 {
-		return 595, 842
+	if w < 10 || h < 10 {
+		return 0, 0, false
 	}
 	return w, h
 }
