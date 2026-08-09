@@ -297,9 +297,9 @@ RUN mkdir -p /etc/ghostscript && \
 # 构建期自检：确保文件写入成功、条目数对得上。
 RUN test -s /etc/ghostscript/cidfmap.local \
   && echo "[dockerfile] cidfmap.local size: $(wc -c < /etc/ghostscript/cidfmap.local) bytes" \
-  && entries=$(grep -cE '^/#' /etc/ghostscript/cidfmap.local) \
-  && echo "[dockerfile] cidfmap.local entries: $entries (expect 8)" \
-  && test "$entries" = "8"
+  && entries=$(grep -cE '^\/' /etc/ghostscript/cidfmap.local) \
+  && echo "[dockerfile] cidfmap.local entries: $entries (expect 21)" \
+  && test "$entries" = "21"
 
 # 如果用户提供了 SimSun/SimHei/SimKai/SimFang 字体，更新 cidfmap.local 映射，
 # 用真实 Windows 字体替换 arphic/wqy 的 fallback 映射，获得更精确的渲染效果。

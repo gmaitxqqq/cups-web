@@ -27,3 +27,36 @@
 % 仿宋 (B7 C2 CB CE)
 /#b7#c2#cb#ce << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simfang.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
 /#b7#c2#cb#ce,Bold << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simfang.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+
+% ═══════════════════════════════════════════════════════════════
+% Adobe 标准 CJK Type0 CIDFont 名称映射（电子发票/ Acrobat 导出）
+% ═══════════════════════════════════════════════════════════════
+% 中国税务局电子发票系统使用 Adobe 标准 CJK 字体名（STSong-Light 等），
+% 与上面的 GBK 字节编码名称是两套完全不同的命名体系。GS 遇到未映射的
+% CIDFont 名时会走默认替换路径，导致金额、数字等字段乱码或重叠。
+%
+% 映射策略：Adobe 标准 CJK 字体名 → docker-fonts/ 中的 Windows 原版 TTF。
+% Bold 变体统一映射到同款 Regular 字体文件（GS 会做 synthetic bold）。
+
+% ── 宋体 (STSong) ──
+/STSong-Light << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simsun.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STSong-Regular << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simsun.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STSong-Bold << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simsun.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+
+% ── 黑体 (STHeiti) ──
+/STHeiti-Light << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simhei.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STHeiti-Regular << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simhei.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STHeiti-Bold << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simhei.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+
+% ── 仿宋 (STFangsong) ──
+/STFangsong << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simfang.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STFangsong-Bold << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simfang.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+
+% ── 楷体 (STKaiti) ──
+/STKaiti << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simkai.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STKaiti-Bold << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simkai.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+
+% ── 华文系列 (常见于 WPS/金山导出) ──
+/STZhongsong << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simsun.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STXingkai << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simkai.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
+/STXinwei << /FileType /TrueType /Path (/usr/share/fonts/truetype/custom/simsun.ttf) /SubfontID 0 /CSI [(GB1) 2] >> ;
