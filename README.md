@@ -69,6 +69,10 @@ docker compose pull     # 拉取新镜像
 docker compose up -d    # 重启容器
 ```
 
+> **镜像大小说明**：完整镜像约 **665MB**（未压缩）。这比官方 `hanxi/cups-web:latest` 的 1.6GB 小，
+> 是因为本构建只编**单平台 amd64** 且基础镜像更精简，功能完全一致（CUPS + Ghostscript + CJK/Windows 中文字体都已烤进镜像）。
+> 你在 GitHub 仓库页看到的「200 KB」是**源码仓库**的体积，不是镜像——镜像拉下来是几百 MB，属正常。
+
 打开 `http://<你的机器IP>:1180` —— 应该**直接进入主界面，没有登录框**。
 
 > 如果还想保留原来的账号密码登录，把 `AUTH_DISABLED=true` 删掉或直接设为 `false` 即可，行为与原版一致。
