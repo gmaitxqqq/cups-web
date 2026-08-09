@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -422,8 +423,56 @@ const (
 	imageNormalizeJPEGQ  = 95   // JPEG 质量（高质量，接近无损）
 )
 
+// getPDFPageDimensions 用 gs bbox 设备获取 PDF 第一页的 MediaBox 尺寸（单位：pt）。
+// 返回 (widthPt, heightPt)。失败时回退为 A4 (595×842 pt)。
+func getPDFPageDimensions(inputPath string) (float64, float64) {
+	gsBin, err := exec.LookPath("gs")
+	if err != nil {
+		return 595, 842 // A4 fallback
+	}
+	tmpDir, _ := os.MkdirTemp("", "pdf-bbox-")
+	defer os.RemoveAll(tmpDir)
+	bboxOut := filepath.Join(tmpDir, "bbox.txt")
+	args := []string{
+		"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
+		"-sDEVICE=bbox",
+		"-sOutputFile=" + bboxOut,
+		inputPath,
+	}
+	cmd := exec.Command(gsBin, args...)
+	cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
+	cmd.Run() // ignore errors, try to parse output anyway
+
+	data, err := os.ReadFile(bboxOut)
+	if err != nil {
+		return 595, 842
+	}
+	// 解析 %%HiResBoundingBox: x0 y0 x1 y1
+	re := regexp.MustCompile(`HiResBoundingBox:\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)`)
+	matches := re.FindStringSubmatch(string(data))
+	if len(matches) != 5 {
+		return 595, 842
+	}
+	x0, _ := strconv.ParseFloat(matches[1], 64)
+	y0, _ := strconv.ParseFloat(matches[2], 64)
+	x1, _ := strconv.ParseFloat(matches[3], 64)
+	y1, _ := strconv.ParseFloat(matches[4], 64)
+	w := x1 - x0
+	h := y1 - y0
+	if w < 1 || h < 1 {
+		return 595, 842
+	}
+	return w, h
+}
+
+// ptToMm 将点(pt)转换为毫米(mm): 1 pt = 25.4/72 mm ≈ 0.3528 mm
+func ptToMm(pt float64) float64 {
+	return pt * 25.4 / 72
+}
+
 // normalizePDFToImagePDF 把 PDF 的每一页渲染成高 DPI JPEG 再打包成图片 PDF。
 // 返回的 PDF 每页是一张 full-page 图像，无字体依赖，预览和打印完全一致。
+// 页面尺寸自动匹配原始 PDF 的 MediaBox，不做任何拉伸/裁剪。
 func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePDFResult, error) {
 	gsBin, err := exec.LookPath("gs")
 	if err != nil {
@@ -434,6 +483,11 @@ func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePD
 	if err != nil || numPages < 1 {
 		numPages = 1
 	}
+
+	// 获取原始页面尺寸，用于创建匹配的图片 PDF 页面
+	pageW_pt, pageH_pt := getPDFPageDimensions(inputPath)
+	pageW_mm := ptToMm(pageW_pt)
+	pageH_mm := ptToMm(pageH_pt)
 
 	tmpDir, err := os.MkdirTemp("", "pdf-rasterize-")
 	if err != nil {
@@ -462,17 +516,20 @@ func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePD
 		}
 	}
 
-	// 用 gofpdf 把图片打包成 PDF（复用 compose 路径已有的 import）
+	// 用 gofpdf 把图片打包成 PDF，使用与原始 PDF 匹配的页面尺寸
 	outPath := filepath.Join(tmpDir, "rasterized.pdf")
-	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf := gofpdf.NewCustom(&gofpdf.InitType{
+		UnitStr: "mm",
+		Size:    gofpdf.SizeType{Wd: pageW_mm, Ht: pageH_mm},
+	})
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 
 	for p := 1; p <= numPages; p++ {
 		imgPath := filepath.Join(tmpDir, fmt.Sprintf("page_%04d.jpg", p))
 		pdf.AddPage()
-		// A4 尺寸 210×297mm，图片铺满整页
-		pdf.Image(imgPath, 0, 0, 210, 297, false, "", 0, "")
+		// 图片铺满整页，保持原始比例（无拉伸/裁剪）
+		pdf.Image(imgPath, 0, 0, pageW_mm, pageH_mm, false, "", 0, "")
 	}
 
 	if err := pdf.OutputFileAndClose(outPath); err != nil {
@@ -480,8 +537,9 @@ func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePD
 		return nil, fmt.Errorf("rasterize: gofpdf pack failed: %w", err)
 	}
 
-	log.Printf("[pdf-normalize] method=rasterize pages=%d dpi=%d in=%s out=%s",
-		numPages, imageNormalizeDPI, filepath.Base(inputPath), filepath.Base(outPath))
+	log.Printf("[pdf-normalize] method=rasterize pages=%d dpi=%d pageSize=%.1fx%.1fpt (%.1fx%.1fmm) in=%s out=%s",
+		numPages, imageNormalizeDPI, pageW_pt, pageH_pt, pageW_mm, pageH_mm,
+		filepath.Base(inputPath), filepath.Base(outPath))
 
 	return &normalizePDFResult{
 		OutputPath: outPath,
