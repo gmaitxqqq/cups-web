@@ -11,8 +11,7 @@ import (
 // RequireSession ensures a valid session cookie exists.
 func RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, err := auth.GetSession(r)
-		if err != nil {
+		if _, err := auth.GetSession(r); err != nil {
 			// 免登录模式：注入一个匿名 admin 会话，放行所有受保护接口。
 			if auth.AuthDisabled() {
 				anon := auth.AnonymousAdminSession()
