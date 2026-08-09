@@ -3,6 +3,7 @@ package main
 import (
 	"mime/multipart"
 	"net/http"
+	"os"
 )
 
 func composeHandler(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +55,26 @@ func composeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cleanup()
+
+	// 预览专用：format=png 时把合成结果渲染成 PNG 返回，前端用 <img> 显示，
+	// 彻底绕过 pdf.js（worker 在受限部署中可能无法加载）。
+	if r.FormValue("format") == "png" {
+		pngPath, pngCleanup, perr := renderPDFToPreviewPNG(ctx, outPath)
+		if perr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "preview render failed: "+perr.Error())
+			return
+		}
+		defer pngCleanup()
+		data, rerr := os.ReadFile(pngPath)
+		if rerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "preview read failed")
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", "inline; filename=\"preview.png\"")
+		w.Write(data)
+		return
+	}
 
 	streamPDF(w, outPath, "composed.pdf")
 }

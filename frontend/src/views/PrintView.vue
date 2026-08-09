@@ -783,12 +783,9 @@ async function convertToPdf() {
   }
 }
 
-// 对当前 PDF 显式应用后端 gs 规范化。
-// 后端 /api/convert?normalize=true&format=imagepdf 会把 PDF 每页渲染成 300DPI 图片
-// 再打包成图片 PDF（光栅化路径），彻底解决：
-//   1) CJK 字体未嵌入导致预览空白/乱码
-//   2) GS pdfwrite 字体替换后度量不匹配 → 打印文字挤在一起/出框
-// 规范化结果替换 pdfBlob 与 previewUrl，后续打印发的就是这份字节流。
+// 对当前 PDF 生成 PNG 预览（绕开 pdf.js）。
+// 后端 /api/convert?format=png 把 PDF 渲染成图片返回，前端用 <img> 显示。
+// 只刷新预览，不改动打印用的 pdfBlob（保持原始字节）。
 async function applyGsNormalization() {
   const f = selectedFile.value
   if (!f || f.type !== 'application/pdf') return
@@ -797,8 +794,7 @@ async function applyGsNormalization() {
   try {
     const fd = new FormData()
     fd.append('file', f, f.name)
-    fd.append('normalize', 'true')
-    fd.append('format', 'imagepdf')
+    fd.append('format', 'png')
     const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) throw new Error(await readError(resp))
     const blob = await resp.blob()
@@ -806,20 +802,20 @@ async function applyGsNormalization() {
     if (selectedFile.value !== f) return
     clearPreviewUrl()
     previewUrl.value = URL.createObjectURL(blob)
-    previewType.value = 'pdf'
+    previewType.value = 'image'
     textPreview.value = ''
-    pdfBlob.value = blob
     gsApplied.value = true
-    toast.add({ title: '已应用 GS 规范化（光栅化模式）', color: 'success', icon: 'i-lucide-check-circle' })
+    toast.add({ title: '已生成预览（图片模式）', color: 'success', icon: 'i-lucide-check-circle' })
   } catch (e) {
-    toast.add({ title: '应用 GS 失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
+    toast.add({ title: '预览生成失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
   } finally {
     gsApplying.value = false
   }
 }
 
-// 上传 PDF 时自动走 GS 光栅化（imagepdf）：让预览永远可用，且规避 CJK 字体未嵌入
-// 造成的 pdf.js 空白/失败。成功后用图片 PDF 替换预览与打印字节；失败则回退原始字节。
+// 上传 PDF 时自动生成 PNG 预览：后端 GS 把 PDF 渲染成图片后前端用 <img> 显示，
+// 彻底绕开 pdf.js（在受限部署中 worker 加载失败会导致所有 PDF 预览空白/报错）。
+// 打印仍使用原始 PDF 字节（pdfBlob=f），与后端 /api/print 解耦，互不影响。
 // 不使用 gsApplying 入口守卫（避免快速连续上传第二个文件时被跳过），靠末尾的
 // selectedFile 比对丢弃过期结果。
 async function autoRasterizePdf(f) {
@@ -827,8 +823,7 @@ async function autoRasterizePdf(f) {
   try {
     const fd = new FormData()
     fd.append('file', f, f.name)
-    fd.append('normalize', 'true')
-    fd.append('format', 'imagepdf')
+    fd.append('format', 'png')
     const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) throw new Error(await readError(resp))
     const blob = await resp.blob()
@@ -836,18 +831,14 @@ async function autoRasterizePdf(f) {
     if (selectedFile.value !== f) return
     clearPreviewUrl()
     previewUrl.value = URL.createObjectURL(blob)
-    previewType.value = 'pdf'
+    previewType.value = 'image'
     textPreview.value = ''
-    pdfBlob.value = blob
     gsApplied.value = true
   } catch (e) {
-    // 转换失败：回退到原始 PDF 字节做预览（可能空白，但至少不卡在"正在光栅化"）
+    // 预览生成失败：打印不受影响，仅提示可直接打印
     if (selectedFile.value !== f) return
-    clearPreviewUrl()
-    previewUrl.value = URL.createObjectURL(f)
-    previewType.value = 'pdf'
-    textPreview.value = ''
-    toast.add({ title: 'PDF 自动光栅化失败，已回退原始预览', description: e.message, color: 'warning', icon: 'i-lucide-alert-triangle' })
+    previewType.value = 'text'
+    textPreview.value = 'PDF 预览生成失败（不影响打印，可直接点击"开始打印"）。'
   } finally {
     gsApplying.value = false
   }
@@ -1114,18 +1105,26 @@ async function composeAndPreview() {
   composing.value = true
   try {
     const fd = new FormData()
+    const fdPng = new FormData()
     if (printMode.value === 'invoice') {
       fd.append('mode', 'invoice')
+      fdPng.append('mode', 'invoice')
       for (const f of invoiceFiles.value) {
         fd.append('files', f, f.name)
+        fdPng.append('files', f, f.name)
       }
     } else if (printMode.value === 'id_card') {
       fd.append('mode', 'id_card')
       fd.append('paper', idCardPaper.value)
+      fdPng.append('mode', 'id_card')
+      fdPng.append('paper', idCardPaper.value)
       fd.append('files', idCardFront.value, idCardFront.value.name)
       fd.append('files', idCardBack.value, idCardBack.value.name)
+      fdPng.append('files', idCardFront.value, idCardFront.value.name)
+      fdPng.append('files', idCardBack.value, idCardBack.value.name)
     }
 
+    // 1) 合成 PDF（用于打印）
     const resp = await apiFetch('/api/compose', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) {
       throw new Error(await readError(resp))
@@ -1133,8 +1132,24 @@ async function composeAndPreview() {
     const blob = await resp.blob()
     clearPreviewUrl()
     pdfBlob.value = blob
-    previewUrl.value = URL.createObjectURL(blob)
-    previewType.value = 'pdf'
+
+    // 2) 预览：优先用后端渲染的 PNG（绕开 pdf.js）；失败则提示不影响打印
+    try {
+      const pngResp = await apiFetch('/api/compose?format=png', { method: 'POST', body: fdPng }, () => emit('logout'))
+      if (pngResp.ok) {
+        const pngBlob = await pngResp.blob()
+        previewUrl.value = URL.createObjectURL(pngBlob)
+        previewType.value = 'image'
+        textPreview.value = ''
+      } else {
+        previewType.value = 'text'
+        textPreview.value = '预览生成失败（不影响打印，可直接点击"开始打印"）。'
+      }
+    } catch (_) {
+      previewType.value = 'text'
+      textPreview.value = '预览生成失败（不影响打印，可直接点击"开始打印"）。'
+    }
+
     converted.value = true
     downloadName.value = printMode.value === 'invoice' ? '发票合并.pdf' : '身份证.pdf'
     toast.add({ title: '合并成功', color: 'success', icon: 'i-lucide-check-circle' })

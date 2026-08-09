@@ -118,6 +118,26 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer outCleanup()
 
+	// 预览专用：format=png 时把最终 PDF 渲染成 PNG 返回，前端用 <img> 直接显示，
+	// 彻底绕过 pdf.js（在部分受限部署中 worker 无法加载，导致所有 PDF 预览失败）。
+	if r.FormValue("format") == "png" {
+		pngPath, pngCleanup, perr := renderPDFToPreviewPNG(ctx, outPath)
+		if perr != nil {
+			http.Error(w, "preview render failed: "+perr.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer pngCleanup()
+		data, rerr := os.ReadFile(pngPath)
+		if rerr != nil {
+			http.Error(w, "preview read failed: "+rerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", "inline; filename=\""+fh.Filename+".png\"")
+		w.Write(data)
+		return
+	}
+
 	base := filepath.Base(fh.Filename)
 	ext := filepath.Ext(base)
 	name := base[0 : len(base)-len(ext)]
