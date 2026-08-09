@@ -7,6 +7,15 @@
       <header class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-default bg-default">
         <div class="flex items-center gap-3 min-w-0">
           <h1 class="text-xl font-bold shrink-0">CUPS 打印</h1>
+          <!-- 左上角版本号：与 footer 同源，来自 /api/version（二进制构建期由 git commit 注入）。
+               放在标题右侧，登录后即可一眼辨认当前跑的是第几个构建。 -->
+          <span
+            v-if="appVersion"
+            class="shrink-0 rounded border border-default bg-elevated/60 px-1.5 py-0.5 font-mono text-xs text-muted"
+            :title="`当前版本 cups-web ${appVersion}（构建时由 git commit 注入）`"
+          >
+            {{ appVersion }}
+          </span>
           <span v-if="session" class="text-sm text-muted truncate">{{ session.username }}</span>
         </div>
         <div class="flex items-center gap-2">
