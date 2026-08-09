@@ -1,0 +1,47 @@
+services:
+  # 单容器（AIO）形态：cupsd 与 cups-web 跑在同一个容器里，
+  # entrypoint.sh 后台拉起 cupsd（带 watchdog），前台 exec /cups-web 作为 PID 1。
+  cups:
+    image: hanxi/cups-web:latest
+    container_name: cups
+    # 必须 root：容器内要跑 cupsd、lpadmin、dpkg（驱动安装），
+    # 还要往 /usr/lib/cups、/usr/share/ppd 等系统路径写驱动文件。
+    user: root
+    # 解除 AppArmor 限制（issue #91）：
+    # 防止在 PVE (Proxmox VE) LXC 或部分 Linux 系统中出现
+    # apparmor="DENIED" operation="create" comm="jobs.cgi" family="unix" 导致打印失败。
+    # 合并成单容器后它同时也保护 LibreOffice / OFD 转换子进程不被 AppArmor 拦截
+    # （原来这两条注释分别写在 cups 与 web 两个服务上）。
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - CUPSADMIN=${CUPSADMIN:-print}
+      - CUPSPASSWORD=${CUPSPASSWORD:-print}
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "631:631"
+      - "1180:8080"
+    # USB 打印机热插拔支持（issue #81）：
+    # 不能用 devices:——它是容器启动时的一次性设备绑定，打印机「后开机」时
+    # 宿主机 udev 新建的 /dev/bus/usb/<bus>/<dev> 节点不会传播进容器，导致
+    # CUPS 枚举不到，必须重启容器。改为 bind-mount 整个 /dev/bus/usb 目录
+    # （目录挂载实时反映新建节点），配合 device_cgroup_rules 放开 USB 字符
+    # 设备（major 189）的 cgroup 权限，让 CUPS 的 usb backend 在运行时能
+    # 枚举到后接入的打印机。/run/udev 只读挂载让 libusb 读到设备属性，
+    # 改善识别（宿主机无 /run/udev 时该挂载可删除）。
+    volumes:
+      - ./.etc:/etc/cups
+      - ./.data:/data
+      - ./.uploads:/uploads
+      # 驱动持久化快照目录：driver-install 把每个手动安装驱动的产物文件
+      # （PPD / filter / backend / firmware / 闭源 .so）按 manifest.txt 拷进
+      # /opt/cups-drivers/data/<driver>/，容器重启时 entrypoint 的
+      # restore-drivers 再逐文件恢复回系统路径。
+      # ⚠️ 删掉这个目录（或不挂这个卷）= 丢失所有手动安装的第三方驱动，
+      # 重启后需要在 Web「驱动」页面重新安装一遍。
+      - ./.drivers:/opt/cups-drivers/data
+      - /dev/bus/usb:/dev/bus/usb
+      - /run/udev:/run/udev:ro
+    device_cgroup_rules:
+      - 'c 189:* rmw'
+    restart: unless-stopped

@@ -1,0 +1,37 @@
+.etc/
+.data
+.uploads
+.drivers
+
+bin/
+frontend/dist/
+node_modules/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Logs and coverage
+.cache/
+coverage/
+*.log
+
+# Build outputs
+data/
+uploads/
+/server
+
+# Go
+vendor/
+
+# Maven
+ofd-converter/target/
+
+.aone_copilot/
+
+
