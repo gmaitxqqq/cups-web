@@ -107,19 +107,28 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 	kind := detectFileKind(storedAbs, fh.Filename)
 	switch kind {
 	case fileKindPDF:
-		// 修复未嵌入字体的 PDF（如发票金额用的 STSong-Light）在 CUPS/Ghostscript
-		// 渲染时找不到字体而变成空白：打印前用 Ghostscript 规范化并强制嵌入所有字体。
-		// GS 不可用时回退为原样打印（passthrough），保持现有行为不中断打印链路。
+		// 修复未嵌入字体的 PDF（如发票金额用的 STSong-Light）：
+		//   旧方案：GS pdfwrite + cidfmap 字体替换 → 替代字体度量与原始不匹配
+		//         → 文字挤在一起、税额跑出框线（Issue: CJK font metric mismatch）
+		//   新方案：光栅化路径（normalizePDFToImagePDF）→ GS 渲染每页成 300DPI 图片
+		//         → gofpdf 打包成图片 PDF → 像素级精确，无字体度量问题
+		//   GS 不可用时回退为原样打印（passthrough），保持现有行为不中断打印链路。
 		var cerr error
 		pages, cerr = countPDFPages(storedAbs)
 		if cerr != nil {
 			log.Printf("[print] countPDFPages failed: %v", cerr)
 			pages = 1
 		}
-		if normRes, nerr := normalizePDF(countCtx, storedAbs); nerr == nil && normRes.Method != "passthrough" {
+		// 优先尝试光栅化路径（解决 CJK 字体度量不匹配导致的排版错位）
+		if normRes, nerr := normalizePDFToImagePDF(countCtx, storedAbs); nerr == nil {
 			printPath = normRes.OutputPath
 			printCleanup = normRes.Cleanup
-			log.Printf("[print] pdf normalized (method=%s) before printing to embed fonts", normRes.Method)
+			log.Printf("[print] pdf normalized via rasterize (method=%s) before printing", normRes.Method)
+		} else if normRes, nerr := normalizePDF(countCtx, storedAbs); nerr == nil && normRes.Method != "passthrough" {
+			// 光栅化不可用时降级到 pdfwrite 路径
+			printPath = normRes.OutputPath
+			printCleanup = normRes.Cleanup
+			log.Printf("[print] pdf normalized via pdfwrite (method=%s) before printing (rasterize unavailable)", normRes.Method)
 		} else {
 			printPath = storedAbs
 		}

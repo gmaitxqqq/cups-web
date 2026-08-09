@@ -783,9 +783,11 @@ async function convertToPdf() {
 }
 
 // 对当前 PDF 显式应用后端 gs 规范化。
-// 后端 /api/convert?normalize=true 会把 PDF 重写为 1.4 版本并嵌入所有字体，
-// 用于修复 CJK 字体外挂 CMap 导致的乱码等问题。规范化结果替换 pdfBlob 与
-// previewUrl，后续打印发的就是这份字节流。
+// 后端 /api/convert?normalize=true&format=imagepdf 会把 PDF 每页渲染成 300DPI 图片
+// 再打包成图片 PDF（光栅化路径），彻底解决：
+//   1) CJK 字体未嵌入导致预览空白/乱码
+//   2) GS pdfwrite 字体替换后度量不匹配 → 打印文字挤在一起/出框
+// 规范化结果替换 pdfBlob 与 previewUrl，后续打印发的就是这份字节流。
 async function applyGsNormalization() {
   const f = selectedFile.value
   if (!f || f.type !== 'application/pdf') return
@@ -795,6 +797,7 @@ async function applyGsNormalization() {
     const fd = new FormData()
     fd.append('file', f, f.name)
     fd.append('normalize', 'true')
+    fd.append('format', 'imagepdf')
     const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) throw new Error(await readError(resp))
     const blob = await resp.blob()
@@ -806,7 +809,7 @@ async function applyGsNormalization() {
     textPreview.value = ''
     pdfBlob.value = blob
     gsApplied.value = true
-    toast.add({ title: '已应用 GS 规范化', color: 'success', icon: 'i-lucide-check-circle' })
+    toast.add({ title: '已应用 GS 规范化（光栅化模式）', color: 'success', icon: 'i-lucide-check-circle' })
   } catch (e) {
     toast.add({ title: '应用 GS 失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
   } finally {

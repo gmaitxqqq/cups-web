@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/phpdave11/gofpdf"
 )
 
 // normalizePDFResult 描述一次 PDF 标准化的产物与元信息。
@@ -397,4 +399,93 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 	n, err := b.r.Read(p)
 	b.remaining -= int64(n)
 	return n, err
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 光栅化标准化路径（解决 CJK 字体度量不匹配导致排版错位）
+// ═══════════════════════════════════════════════════════════════════
+//
+// 对含有未嵌入 CJK 字体的 PDF（如税务局电子发票），GS pdfwrite 做字体替换后
+// 会用替代字体的度量表重建宽度数组，与原始 PDF 的排版坐标不匹配，导致：
+//   - 文字挤在一起（字符变窄）
+//   - 累积错位使后续文字跑出框线
+//
+// 本路径绕过字体嵌入：用 GS 把每页渲染成高 DPI 光栅图片，再用 gofpdf 把
+// 图片逐页打包成新 PDF。输出是"每页一整张图片"的 PDF，pdf.js 可完美预览，
+// CUPS 打印时也原样输出像素，不存在任何字体/度量问题。
+//
+// 代价：文件较大（300 DPI A4 ≈ 每页 1~3MB JPEG）、文字不可搜索/选中。
+// 对发票/凭证类打印场景完全可接受。
+
+const (
+	imageNormalizeDPI    = 300  // 渲染 DPI（打印够用，文件不会太大）
+	imageNormalizeJPEGQ  = 95   // JPEG 质量（高质量，接近无损）
+)
+
+// normalizePDFToImagePDF 把 PDF 的每一页渲染成高 DPI JPEG 再打包成图片 PDF。
+// 返回的 PDF 每页是一张 full-page 图像，无字体依赖，预览和打印完全一致。
+func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePDFResult, error) {
+	gsBin, err := exec.LookPath("gs")
+	if err != nil {
+		return nil, fmt.Errorf("rasterize: ghostscript %w", errBinaryNotInstalled)
+	}
+
+	numPages, err := countPDFPages(inputPath)
+	if err != nil || numPages < 1 {
+		numPages = 1
+	}
+
+	tmpDir, err := os.MkdirTemp("", "pdf-rasterize-")
+	if err != nil {
+		return nil, fmt.Errorf("rasterize: tmpdir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
+
+	// 逐页渲染成 JPEG
+	for p := 1; p <= numPages; p++ {
+		outPath := filepath.Join(tmpDir, fmt.Sprintf("page_%04d.jpg", p))
+		args := []string{
+			"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
+			"-sDEVICE=jpeg",
+			fmt.Sprintf("-dJPEGQ=%d", imageNormalizeJPEGQ),
+			fmt.Sprintf("-r%d", imageNormalizeDPI),
+			fmt.Sprintf("-dFirstPage=%d", p),
+			fmt.Sprintf("-dLastPage=%d", p),
+			"-sOutputFile=" + outPath,
+			inputPath,
+		}
+		cmd := exec.CommandContext(ctx, gsBin, args...)
+		cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("rasterize: gs render page %d failed: %w - %s", p, err, firstErrorLine(string(out)))
+		}
+	}
+
+	// 用 gofpdf 把图片打包成 PDF（复用 compose 路径已有的 import）
+	outPath := filepath.Join(tmpDir, "rasterized.pdf")
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(0, 0, 0)
+	pdf.SetAutoPageBreak(false, 0)
+
+	for p := 1; p <= numPages; p++ {
+		imgPath := filepath.Join(tmpDir, fmt.Sprintf("page_%04d.jpg", p))
+		pdf.AddPage()
+		// A4 尺寸 210×297mm，图片铺满整页
+		pdf.Image(imgPath, 0, 0, 210, 297, false, "", 0, "")
+	}
+
+	if err := pdf.OutputFileAndClose(outPath); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("rasterize: gofpdf pack failed: %w", err)
+	}
+
+	log.Printf("[pdf-normalize] method=rasterize pages=%d dpi=%d in=%s out=%s",
+		numPages, imageNormalizeDPI, filepath.Base(inputPath), filepath.Base(outPath))
+
+	return &normalizePDFResult{
+		OutputPath: outPath,
+		Cleanup:    cleanup,
+		Method:     "rasterize",
+	}, nil
 }

@@ -31,6 +31,52 @@
 
 **该管线只解决"CUPS 老驱动拒绝 PDF-1.7 新语法"这一类真正的兼容性故障**，对"预览显示"不会有帮助：gs 会把空壳 CJK 字体改写成带 subset 前缀的假嵌入字体，反而让浏览器 pdf.js 在预览时出现错位（详见前端 `PdfCanvas.vue` 的 `getDocument` 参数注释）。因此 `/api/convert` 预览入口应该**优先让 pdf.js 直接读原始 PDF**，只在真实打印前做最小化标准化。
 
+## 光栅化路径（`normalizePDFToImagePDF`）—— CJK 字体问题的终极解法
+
+> 新增于 2026-08-09，解决电子发票等 CJK 未嵌入字体 PDF 的两大痛点。
+
+### 问题背景
+
+GS `pdfwrite` + cidfmap 字体替换虽然能让文字显示出来，但有一个根本缺陷：
+
+> **替代字体的字符宽度度量（metrics）与原始 PDF 的排版坐标不匹配。**
+
+原始 PDF 用 STSong-Light 的宽度表排好版（每个 CID 有精确的 advance width），GS 替换成 simsun.ttf 后重新计算宽度，simsun.ttf 的 CJK 字符宽度与 STSong-Light 不同 → 累积误差 → 文字挤在一起、后续内容跑出框线。
+
+同时，pdfwrite 输出的「subset 前缀假嵌入字体」会让 pdf.js 预览更加错乱。
+
+### 工作原理
+
+```
+输入 PDF (STSong-Light 未嵌入)
+    ↓ GS -sDEVICE=jpeg -r300 (逐页渲染)
+每页一张 300DPI JPEG (像素级精确还原原始外观)
+    ↓ gofpdf 打包
+输出 PDF (每页 = 一张 full-page JPEG 图片)
+```
+
+**关键特性**：
+- 完全绕过字体嵌入/替换，不存在度量匹配问题
+- 输出是图片 PDF，pdf.js 可完美渲染（无字体依赖）
+- 预览效果 = 打印效果（所见即所得）
+- 300 DPI 对打印足够（A4 ≈ 2480×3508 px/页）
+
+### 使用场景
+
+| 场景 | 入口 | 触发方式 |
+|---|---|---|
+| **打印** | `print_handlers.go` | PDF 打印时自动走光栅化（优先于 pdfwrite） |
+| **预览** | `/api/convert?normalize=true&format=imagepdf` | 前端「应用 GS 规范化」按钮 |
+| **发票合成** | `pdf_compose.go` | 合成前 normalizePDF（保持不变） |
+
+### 代价
+
+- 文件较大：300 DPI A4 JPEG 每页约 1~3MB（Q95）
+- 文字不可搜索/选中（已是图片）
+- 处理稍慢（需逐页光栅化）
+
+对发票/凭证类打印场景完全可接受。
+
 ## Ghostscript cidfmap：中文字形映射的两套加载机制
 
 打印纸面中文字形的配套：镜像把 `docker-fonts/cidfmap.local` 里宋/黑/楷/仿宋（Regular + Bold，共 8 条 GBK 字节 BaseFont）到 `arphic-uming` / `arphic-ukai` / `wqy-zenhei` 三套 TrueType 字体的映射交给 gs，让 gs pdfwrite 在重建字体字典时能按字体名落到不同字形上，而不是全部坍缩成单一 `DroidSansFallback` 无衬线体。

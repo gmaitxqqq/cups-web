@@ -76,15 +76,33 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		// 否则原样回传，预览端使用原始字节，打印端也读同一份字节，预览/打印一致。
 		if r.FormValue("normalize") == "true" {
 			diagnosePDF(inPath)
-			res, normErr := normalizePDF(ctx, inPath)
-			if normErr != nil {
-				err = normErr
-			} else {
-				outPath = res.OutputPath
-				if res.Cleanup != nil {
-					outCleanup = res.Cleanup
+			// format=imagepdf: 光栅化路径（图片 PDF），解决两个问题：
+			//   1) GS pdfwrite 字体替换后度量不匹配 → 排版挤在一起/出框
+			//   2) pdf.js 无法渲染 GS 嵌入的假 CJK 字体 → 预览空白/错位
+			//   输出是每页一张 300DPI JPEG 的 PDF，预览和打印完全一致。
+			if r.FormValue("format") == "imagepdf" {
+				res, normErr := normalizePDFToImagePDF(ctx, inPath)
+				if normErr != nil {
+					err = normErr
 				} else {
-					outCleanup = func() {}
+					outPath = res.OutputPath
+					if res.Cleanup != nil {
+						outCleanup = res.Cleanup
+					} else {
+						outCleanup = func() {}
+					}
+				}
+			} else {
+				res, normErr := normalizePDF(ctx, inPath)
+				if normErr != nil {
+					err = normErr
+				} else {
+					outPath = res.OutputPath
+					if res.Cleanup != nil {
+						outCleanup = res.Cleanup
+					} else {
+						outCleanup = func() {}
+					}
 				}
 			}
 		} else {
