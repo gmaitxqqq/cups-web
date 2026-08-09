@@ -462,15 +462,16 @@ function processFile(f) {
   downloadName.value = f.name.replace(/\.[^/.]+$/, '') + '.pdf'
 
   if (f.type === 'application/pdf') {
-    // 默认不再对上传 PDF 走 /api/convert (gs 规范化)：直接用原始字节做预览和打印，
-    // 上传即可秒开预览。如需修复 CJK 字体乱码等问题，用户可点击"应用 GS 规范化"
-    // 显式触发 applyGsNormalization()，把当前 PDF 替换为 gs 产物。
-    clearPreviewUrl()
-    previewUrl.value = URL.createObjectURL(f)
-    previewType.value = 'pdf'
-    textPreview.value = ''
+    // 上传即自动走 GS 光栅化（imagepdf 路径）：把每页渲染成图片再打包成图片 PDF，
+    // 彻底避免 CJK 字体未嵌入导致 pdf.js 预览空白/失败（如 STSong-Light）。
+    // 先给"正在光栅化"占位，异步拿回图片 PDF 后替换预览与打印字节；失败则回退原始字节（至少能打印）。
+    previewType.value = 'text'
+    textPreview.value = '正在光栅化 PDF 预览，请稍候…'
+    previewUrl.value = ''
     pdfBlob.value = f
     converted.value = true
+    gsApplied.value = false
+    autoRasterizePdf(f)
   } else if (f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)) {
     if (isHeicImage(f)) {
       // HEIC/HEIF 浏览器无法原生解码，先提示"正在转换"，异步用 heic2any 转成 JPEG 再预览
@@ -812,6 +813,41 @@ async function applyGsNormalization() {
     toast.add({ title: '已应用 GS 规范化（光栅化模式）', color: 'success', icon: 'i-lucide-check-circle' })
   } catch (e) {
     toast.add({ title: '应用 GS 失败', description: e.message, color: 'error', icon: 'i-lucide-x-circle' })
+  } finally {
+    gsApplying.value = false
+  }
+}
+
+// 上传 PDF 时自动走 GS 光栅化（imagepdf）：让预览永远可用，且规避 CJK 字体未嵌入
+// 造成的 pdf.js 空白/失败。成功后用图片 PDF 替换预览与打印字节；失败则回退原始字节。
+// 不使用 gsApplying 入口守卫（避免快速连续上传第二个文件时被跳过），靠末尾的
+// selectedFile 比对丢弃过期结果。
+async function autoRasterizePdf(f) {
+  gsApplying.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', f, f.name)
+    fd.append('normalize', 'true')
+    fd.append('format', 'imagepdf')
+    const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
+    if (!resp.ok) throw new Error(await readError(resp))
+    const blob = await resp.blob()
+    // 用户在转换期间已切换/清空文件，丢弃结果
+    if (selectedFile.value !== f) return
+    clearPreviewUrl()
+    previewUrl.value = URL.createObjectURL(blob)
+    previewType.value = 'pdf'
+    textPreview.value = ''
+    pdfBlob.value = blob
+    gsApplied.value = true
+  } catch (e) {
+    // 转换失败：回退到原始 PDF 字节做预览（可能空白，但至少不卡在"正在光栅化"）
+    if (selectedFile.value !== f) return
+    clearPreviewUrl()
+    previewUrl.value = URL.createObjectURL(f)
+    previewType.value = 'pdf'
+    textPreview.value = ''
+    toast.add({ title: 'PDF 自动光栅化失败，已回退原始预览', description: e.message, color: 'warning', icon: 'i-lucide-alert-triangle' })
   } finally {
     gsApplying.value = false
   }
