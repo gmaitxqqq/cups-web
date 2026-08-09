@@ -486,7 +486,7 @@ func parseMediaBoxFromPDF(inputPath string) (float64, float64, bool) {
 	if w < 10 || h < 10 {
 		return 0, 0, false
 	}
-	return w, h
+	return w, h, true
 }
 
 // ptToMm 将点(pt)转换为毫米(mm): 1 pt = 25.4/72 mm ≈ 0.3528 mm
