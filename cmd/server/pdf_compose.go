@@ -506,6 +506,10 @@ func renderPDFToImages(ctx context.Context, pdfPath string, numPages int, tmpDir
 		args := []string{
 			"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
 			"-sDEVICE=jpeg", "-dJPEGQ=95", "-r300",
+			// 按内容区的 CropBox 裁掉白边（如滴滴发票内容只占上半页，
+			// 不裁的话会把整张 A4 渲染进去，放进半页槽位时铺不满）。
+			// 无 CropBox 的 PDF 会自动回退到 MediaBox，安全通用。
+			"-dUseCropBox",
 			fmt.Sprintf("-dFirstPage=%d", p),
 			fmt.Sprintf("-dLastPage=%d", p),
 			"-sOutputFile=" + outPath,
