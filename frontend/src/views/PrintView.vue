@@ -201,6 +201,7 @@
           v-model:img-scale-mode="imgScaleMode"
           v-model:img-scale-pct="imgScalePct"
           v-model:img-align="imgAlign"
+          v-model:img-v-align="imgVAlign"
         />
 
         <!-- 开始打印按钮 -->
@@ -299,10 +300,11 @@ const watermarkText = ref('')
 const numberUp = ref(1)
 const numberUpLayout = ref('lrtb')
 const pageBorder = ref('none')
-// 图片排版：缩放方式（auto=自动适应 / manual=手动）、手动百分比 1-100、水平对齐
+// 图片排版：缩放方式（auto=自动适应 / manual=手动）、手动百分比 1-100、水平对齐、垂直对齐
 const imgScaleMode = ref('auto')
 const imgScalePct = ref(100)
 const imgAlign = ref('center')
+const imgVAlign = ref('center')
 
 // ─── 打印模式 ─────────────────────────────────────────────
 const printMode = ref(localStorage.getItem('print_mode') || 'standard')
@@ -378,7 +380,7 @@ const isImage = computed(() => isMultiImage.value || (selectedFile.value && sele
 
 // 图片缩放/对齐变化时，若已转换过则防抖重新转换，使预览实时反映排版
 let imgLayoutDebounce = null
-watch([imgScaleMode, imgScalePct, imgAlign], () => {
+watch([imgScaleMode, imgScalePct, imgAlign, imgVAlign], () => {
   if (!isImage.value || !converted.value) return
   if (imgLayoutDebounce) clearTimeout(imgLayoutDebounce)
   imgLayoutDebounce = setTimeout(() => { convertToPdf() }, 350)
@@ -675,6 +677,7 @@ async function uploadAndPrintBatch() {
         const scaleVal = imgScaleMode.value === 'manual' ? imgScalePct.value : 0
         fd.append('scale', String(scaleVal))
         fd.append('align', imgAlign.value)
+        fd.append('valign', imgVAlign.value)
         const convertResp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
         if (!convertResp.ok) {
           throw new Error(await readError(convertResp))
@@ -749,10 +752,11 @@ async function convertImagesToPdfViaServer(files, orient, pSize, name, format = 
   }
   if (orient) fd.append('orientation', orient)
   if (pSize) fd.append('paper_size', pSize)
-  // 图片排版：手动模式传百分比，自动模式传 0；对齐 center/left/right
+  // 图片排版：手动模式传百分比，自动模式传 0；对齐 center/left/right；垂直 top/center/bottom
   const scaleVal = imgScaleMode.value === 'manual' ? imgScalePct.value : 0
   fd.append('scale', String(scaleVal))
   fd.append('align', imgAlign.value)
+  fd.append('valign', imgVAlign.value)
   if (format) fd.append('format', format)
   const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
   if (!resp.ok) throw new Error('服务端转换失败：' + await readError(resp))

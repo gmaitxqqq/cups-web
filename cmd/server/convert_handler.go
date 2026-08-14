@@ -20,9 +20,11 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	paperSize := r.FormValue("paper_size")
 
 	// 图片排版参数（仅对图片转换生效）：scale=0 自动适应；1-100 为手动百分比；
-	// align=center/left/right 控制水平对齐。后端 convertImageToPDF / convertImagesMultiToPDF 使用。
+	// align=center/left/right 控制水平对齐；valign=top/center/bottom 控制垂直对齐。
+	// 后端 convertImageToPDF / convertImagesMultiToPDF 使用。
 	scaleStr := r.FormValue("scale")
 	align := r.FormValue("align")
+	valign := r.FormValue("valign")
 	var scalePct float64
 	if scaleStr != "" {
 		if v, e := strconv.ParseFloat(scaleStr, 64); e == nil {
@@ -40,6 +42,11 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		align = "center"
 	}
+	switch valign {
+	case "top", "bottom":
+	default:
+		valign = "center"
+	}
 
 	var outPath string
 	var outCleanup func()
@@ -49,7 +56,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// 优先处理多文件字段（图片合并场景）
 	if r.MultipartForm != nil {
 		if headers, ok := r.MultipartForm.File["files"]; ok && len(headers) > 0 {
-			outPath, outCleanup, err = convertImagesMultiToPDF(headers, orientation, paperSize, scalePct, align)
+			outPath, outCleanup, err = convertImagesMultiToPDF(headers, orientation, paperSize, scalePct, align, valign)
 			if err != nil {
 				http.Error(w, "conversion failed: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -88,7 +95,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	kind := detectFileKind(inPath, fh.Filename)
 	switch kind {
 	case fileKindImage:
-		outPath, outCleanup, err = convertImageToPDF(inPath, orientation, paperSize, scalePct, align)
+		outPath, outCleanup, err = convertImageToPDF(inPath, orientation, paperSize, scalePct, align, valign)
 	case fileKindText:
 		outPath, outCleanup, err = convertTextToPDF(inPath, orientation, paperSize)
 	case fileKindOFD:

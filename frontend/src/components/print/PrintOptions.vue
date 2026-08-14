@@ -86,8 +86,8 @@
           </div>
         </UFormField>
 
-        <!-- 对齐方式 -->
-        <UFormField label="对齐方式">
+        <!-- 对齐方式：水平 + 垂直 -->
+        <UFormField label="水平对齐">
           <div class="flex rounded-lg border border-muted overflow-hidden">
             <label
               v-for="item in alignItems"
@@ -96,6 +96,21 @@
               :class="imgAlign === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
             >
               <input type="radio" :value="item.value" :checked="imgAlign === item.value" class="sr-only" @change="$emit('update:imgAlign', item.value)" />
+              <UIcon :name="item.icon" class="w-3.5 h-3.5 shrink-0" />
+              <span class="text-xs whitespace-nowrap">{{ item.label }}</span>
+            </label>
+          </div>
+        </UFormField>
+
+        <UFormField label="垂直对齐">
+          <div class="flex rounded-lg border border-muted overflow-hidden">
+            <label
+              v-for="item in valignItems"
+              :key="item.value"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 cursor-pointer text-sm transition"
+              :class="imgVAlign === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
+            >
+              <input type="radio" :value="item.value" :checked="imgVAlign === item.value" class="sr-only" @change="$emit('update:imgVAlign', item.value)" />
               <UIcon :name="item.icon" class="w-3.5 h-3.5 shrink-0" />
               <span class="text-xs whitespace-nowrap">{{ item.label }}</span>
             </label>
@@ -239,7 +254,8 @@ const props = defineProps({
   isImage: { type: Boolean, default: false },
   imgScaleMode: { type: String, default: 'auto' },
   imgScalePct: { type: Number, default: 100 },
-  imgAlign: { type: String, default: 'center' }
+  imgAlign: { type: String, default: 'center' },
+  imgVAlign: { type: String, default: 'center' }
 })
 
 const emit = defineEmits([
@@ -247,7 +263,7 @@ const emit = defineEmits([
   'update:paperSize', 'update:paperType', 'update:mediaSource', 'update:printScaling', 'update:pageRange',
   'update:pageSet', 'update:mirror', 'update:watermarkText',
   'update:numberUp', 'update:numberUpLayout', 'update:pageBorder',
-  'update:imgScaleMode', 'update:imgScalePct', 'update:imgAlign'
+  'update:imgScaleMode', 'update:imgScalePct', 'update:imgAlign', 'update:imgVAlign'
 ])
 
 const showAdvanced = ref(localStorage.getItem('print_options_expanded') === '1')
@@ -317,7 +333,9 @@ const advancedSummary = computed(() => {
     if (props.imgScaleMode === 'manual') parts.push(`缩放: ${props.imgScalePct}%`)
     else parts.push('图片适应')
     const alignLabel = alignItems.find(i => i.value === props.imgAlign)?.label
-    if (alignLabel && props.imgAlign !== 'center') parts.push(`对齐: ${alignLabel}`)
+    if (alignLabel && props.imgAlign !== 'center') parts.push(`水平: ${alignLabel}`)
+    const vLabel = valignItems.find(i => i.value === props.imgVAlign)?.label
+    if (vLabel && props.imgVAlign !== 'center') parts.push(`垂直: ${vLabel}`)
   }
   return parts.join(' / ')
 })
@@ -399,6 +417,11 @@ const alignItems = [
   { label: '居中', value: 'center', icon: 'i-lucide-align-center' },
   { label: '居左', value: 'left', icon: 'i-lucide-align-left' },
   { label: '居右', value: 'right', icon: 'i-lucide-align-right' }
+]
+const valignItems = [
+  { label: '靠上', value: 'top', icon: 'i-lucide-align-vertical-space-around' },
+  { label: '居中', value: 'center', icon: 'i-lucide-align-center-vertical' },
+  { label: '靠下', value: 'bottom', icon: 'i-lucide-arrow-down-to-line' }
 ]
 
 function onImgScaleInput(val) {
