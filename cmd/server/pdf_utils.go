@@ -170,7 +170,45 @@ func getOrientationCode(orientation string) string {
 	return "P"
 }
 
-func convertImageToPDF(inputPath string, orientation string, paperSize string) (string, func(), error) {
+// computeImagePlacement 计算图片在页内的绘制尺寸与坐标（单位 mm）。
+// scalePct: 0 = 自动适应（等比缩放到最大可放区域，保持宽高比）；1-100 = 在自动适应基础上再乘以该百分比。
+// align: center/left/right，控制水平对齐；垂直始终居中。
+// 返回 (x, y, w, h)，可直接传给 gofpdf 的 ImageOptions。
+func computeImagePlacement(imgW, imgH, pageW, pageH, margin, scalePct, align float64) (x, y, w, h float64) {
+	maxW := pageW - 2*margin
+	maxH := pageH - 2*margin
+	if maxW <= 0 {
+		maxW = pageW
+	}
+	if maxH <= 0 {
+		maxH = pageH
+	}
+	fit := math.Min(maxW/imgW, maxH/imgH)
+	if fit <= 0 || math.IsNaN(fit) {
+		fit = 1
+	}
+	// scalePct: 0 → 自动适应；>0 → 在适应基础上再乘百分比
+	if scalePct > 0 {
+		fit = fit * (scalePct / 100.0)
+	}
+	if fit <= 0 {
+		fit = 1
+	}
+	w = imgW * fit
+	h = imgH * fit
+	switch align {
+	case "left":
+		x = margin
+	case "right":
+		x = margin + (maxW - w)
+	default: // center
+		x = margin + (maxW-w)/2
+	}
+	y = margin + (maxH-h)/2
+	return
+}
+
+func convertImageToPDF(inputPath string, orientation string, paperSize string, scalePct float64, align string) (string, func(), error) {
 	tmpDir, err := os.MkdirTemp("", "convert-img-")
 	if err != nil {
 		return "", nil, err
@@ -206,16 +244,7 @@ func convertImageToPDF(inputPath string, orientation string, paperSize string) (
 	pdf.AddPage()
 
 	pageW, pageH := pdf.GetPageSize()
-	maxW := pageW - 2*pdfPageMarginMM
-	maxH := pageH - 2*pdfPageMarginMM
-	scale := math.Min(maxW/float64(cfg.Width), maxH/float64(cfg.Height))
-	if scale <= 0 {
-		scale = 1
-	}
-	w := float64(cfg.Width) * scale
-	h := float64(cfg.Height) * scale
-	x := (pageW - w) / 2
-	y := (pageH - h) / 2
+	x, y, w, h := computeImagePlacement(float64(cfg.Width), float64(cfg.Height), pageW, pageH, pdfPageMarginMM, scalePct, align)
 
 	opts := gofpdf.ImageOptions{ImageType: "", ReadDpi: true}
 	pdf.ImageOptions(imgPath, x, y, w, h, false, opts, 0, "")
@@ -305,7 +334,7 @@ func convertTextToPDF(inputPath string, orientation string, paperSize string) (s
 // convertImagesMultiToPDF 将多张图片合并为单个 PDF。
 // 每张图片占据一页，按等比例缩放居中绘制，页面大小与方向由 orientation / paperSize 决定。
 // 调用方负责在使用完输出 PDF 后调用返回的 cleanup 清理临时目录。
-func convertImagesMultiToPDF(fileHeaders []*multipart.FileHeader, orientation string, paperSize string) (string, func(), error) {
+func convertImagesMultiToPDF(fileHeaders []*multipart.FileHeader, orientation string, paperSize string, scalePct float64, align string) (string, func(), error) {
 	if len(fileHeaders) == 0 {
 		return "", nil, errors.New("no image files provided")
 	}
@@ -377,16 +406,7 @@ func convertImagesMultiToPDF(fileHeaders []*multipart.FileHeader, orientation st
 	for _, img := range saved {
 		pdf.AddPage()
 		pageW, pageH := pdf.GetPageSize()
-		maxW := pageW - 2*pdfPageMarginMM
-		maxH := pageH - 2*pdfPageMarginMM
-		scale := math.Min(maxW/float64(img.cfg.Width), maxH/float64(img.cfg.Height))
-		if scale <= 0 {
-			scale = 1
-		}
-		w := float64(img.cfg.Width) * scale
-		h := float64(img.cfg.Height) * scale
-		x := (pageW - w) / 2
-		y := (pageH - h) / 2
+		x, y, w, h := computeImagePlacement(float64(img.cfg.Width), float64(img.cfg.Height), pageW, pageH, pdfPageMarginMM, scalePct, align)
 
 		opts := gofpdf.ImageOptions{ImageType: "", ReadDpi: true}
 		pdf.ImageOptions(img.path, x, y, w, h, false, opts, 0, "")

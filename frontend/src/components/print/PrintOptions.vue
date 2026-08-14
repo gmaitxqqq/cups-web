@@ -39,6 +39,70 @@
         </UFormField>
       </div>
 
+      <!-- ═══ 图片排版（仅图片文件显示） ═══ -->
+      <div v-if="isImage" class="border-t border-default pt-3 space-y-3">
+        <div class="flex items-center gap-1.5 text-sm font-medium text-primary">
+          <UIcon name="i-lucide-image" class="w-4 h-4" />
+          图片排版
+          <span class="text-[11px] font-normal text-muted">仅对图片生效</span>
+        </div>
+
+        <!-- 缩放方式 -->
+        <UFormField label="缩放方式">
+          <div class="flex rounded-lg border border-muted overflow-hidden">
+            <label
+              v-for="item in imgScaleModeItems"
+              :key="item.value"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 cursor-pointer text-sm transition"
+              :class="imgScaleMode === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
+            >
+              <input type="radio" :value="item.value" :checked="imgScaleMode === item.value" class="sr-only" @change="$emit('update:imgScaleMode', item.value)" />
+              <span class="text-xs whitespace-nowrap">{{ item.label }}</span>
+            </label>
+          </div>
+        </UFormField>
+
+        <!-- 手动缩放：滑块 + 数值 -->
+        <UFormField v-if="imgScaleMode === 'manual'" label="手动缩放">
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              :value="imgScalePct"
+              min="1"
+              max="100"
+              step="1"
+              class="flex-1 accent-primary"
+              @input="$emit('update:imgScalePct', Number($event.target.value))"
+            />
+            <UInput
+              :model-value="imgScalePct"
+              type="number"
+              :min="1"
+              :max="100"
+              class="w-20"
+              @update:model-value="onImgScaleInput"
+            />
+            <span class="text-sm text-muted">%</span>
+          </div>
+        </UFormField>
+
+        <!-- 对齐方式 -->
+        <UFormField label="对齐方式">
+          <div class="flex rounded-lg border border-muted overflow-hidden">
+            <label
+              v-for="item in alignItems"
+              :key="item.value"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 cursor-pointer text-sm transition"
+              :class="imgAlign === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
+            >
+              <input type="radio" :value="item.value" :checked="imgAlign === item.value" class="sr-only" @change="$emit('update:imgAlign', item.value)" />
+              <UIcon :name="item.icon" class="w-3.5 h-3.5 shrink-0" />
+              <span class="text-xs whitespace-nowrap">{{ item.label }}</span>
+            </label>
+          </div>
+        </UFormField>
+      </div>
+
       <!-- ═══ 高级选项折叠区 ═══ -->
       <div class="border-t border-default pt-2">
         <button
@@ -171,14 +235,19 @@ const props = defineProps({
   numberUp: { type: Number, default: 1 },
   numberUpLayout: { type: String, default: 'lrtb' },
   pageBorder: { type: String, default: 'none' },
-  printing: { type: Boolean, default: false }
+  printing: { type: Boolean, default: false },
+  isImage: { type: Boolean, default: false },
+  imgScaleMode: { type: String, default: 'auto' },
+  imgScalePct: { type: Number, default: 100 },
+  imgAlign: { type: String, default: 'center' }
 })
 
 const emit = defineEmits([
   'update:isColor', 'update:duplex', 'update:copies',
   'update:paperSize', 'update:paperType', 'update:mediaSource', 'update:printScaling', 'update:pageRange',
   'update:pageSet', 'update:mirror', 'update:watermarkText',
-  'update:numberUp', 'update:numberUpLayout', 'update:pageBorder'
+  'update:numberUp', 'update:numberUpLayout', 'update:pageBorder',
+  'update:imgScaleMode', 'update:imgScalePct', 'update:imgAlign'
 ])
 
 const showAdvanced = ref(localStorage.getItem('print_options_expanded') === '1')
@@ -244,6 +313,12 @@ const advancedSummary = computed(() => {
   }
   if (props.mirror) parts.push('镜像')
   if (props.watermarkText) parts.push(`水印: ${props.watermarkText}`)
+  if (props.isImage) {
+    if (props.imgScaleMode === 'manual') parts.push(`缩放: ${props.imgScalePct}%`)
+    else parts.push('图片适应')
+    const alignLabel = alignItems.find(i => i.value === props.imgAlign)?.label
+    if (alignLabel && props.imgAlign !== 'center') parts.push(`对齐: ${alignLabel}`)
+  }
   return parts.join(' / ')
 })
 
@@ -314,6 +389,25 @@ const numberUpLayoutItems = [
   { label: '纵向 N 形（上→下，左→右）', value: 'tblr' },
   { label: '纵向 N 形（上→下，右→左）', value: 'tbrl' }
 ]
+
+// 图片排版选项
+const imgScaleModeItems = [
+  { label: '自动适应', value: 'auto' },
+  { label: '手动缩放', value: 'manual' }
+]
+const alignItems = [
+  { label: '居中', value: 'center', icon: 'i-lucide-align-center' },
+  { label: '居左', value: 'left', icon: 'i-lucide-align-left' },
+  { label: '居右', value: 'right', icon: 'i-lucide-align-right' }
+]
+
+function onImgScaleInput(val) {
+  let v = Number(val)
+  if (!Number.isFinite(v)) v = 100
+  if (v < 1) v = 1
+  if (v > 100) v = 100
+  emit('update:imgScalePct', v)
+}
 
 function onPageRangeInput(val) {
   emit('update:pageRange', val)

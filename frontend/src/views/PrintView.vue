@@ -197,6 +197,10 @@
           v-model:numberUpLayout="numberUpLayout"
           v-model:pageBorder="pageBorder"
           :printing="printing"
+          :is-image="isImage"
+          v-model:img-scale-mode="imgScaleMode"
+          v-model:img-scale-pct="imgScalePct"
+          v-model:img-align="imgAlign"
         />
 
         <!-- 开始打印按钮 -->
@@ -295,6 +299,10 @@ const watermarkText = ref('')
 const numberUp = ref(1)
 const numberUpLayout = ref('lrtb')
 const pageBorder = ref('none')
+// 图片排版：缩放方式（auto=自动适应 / manual=手动）、手动百分比 1-100、水平对齐
+const imgScaleMode = ref('auto')
+const imgScalePct = ref(100)
+const imgAlign = ref('center')
 
 // ─── 打印模式 ─────────────────────────────────────────────
 const printMode = ref(localStorage.getItem('print_mode') || 'standard')
@@ -365,6 +373,16 @@ const paperSizeItems = [
 
 // ─── 计算属性 ─────────────────────────────────────────────
 const isMultiImage = computed(() => selectedImages.value.length > 1)
+// 当前选中的是图片（多图或单张图片文件）时，显示"图片排版"控件
+const isImage = computed(() => isMultiImage.value || (selectedFile.value && selectedFile.value.type.startsWith('image/')))
+
+// 图片缩放/对齐变化时，若已转换过则防抖重新转换，使预览实时反映排版
+let imgLayoutDebounce = null
+watch([imgScaleMode, imgScalePct, imgAlign], () => {
+  if (!isImage.value || !converted.value) return
+  if (imgLayoutDebounce) clearTimeout(imgLayoutDebounce)
+  imgLayoutDebounce = setTimeout(() => { convertToPdf() }, 350)
+})
 const multiImageTotalSize = computed(() => selectedImages.value.reduce((sum, f) => sum + f.size, 0))
 const canPrint = computed(() => {
   if (!printer.value) return false
@@ -654,6 +672,9 @@ async function uploadAndPrintBatch() {
         fd.append('file', file, file.name)
         fd.append('orientation', orientation.value)
         fd.append('paper_size', paperSize.value)
+        const scaleVal = imgScaleMode.value === 'manual' ? imgScalePct.value : 0
+        fd.append('scale', String(scaleVal))
+        fd.append('align', imgAlign.value)
         const convertResp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
         if (!convertResp.ok) {
           throw new Error(await readError(convertResp))
@@ -713,7 +734,7 @@ async function uploadAndPrintBatch() {
 //   避免多张原图合并时撞到反向代理的 client_max_body_size 触发 413（Issue #42）。
 //   阈值与后端 imageDownscaleMaxEdge 对齐，服务端拿到时已是合理尺寸，无需再 downscale。
 //   sequential 而非 Promise.all 是为了避免移动端同时持有多张大 canvas 导致 OOM。
-async function convertImagesToPdfViaServer(files, orient, pSize, name) {
+async function convertImagesToPdfViaServer(files, orient, pSize, name, format = '') {
   const list = Array.isArray(files) ? files : [files]
   const downscaled = []
   for (const f of list) {
@@ -728,6 +749,11 @@ async function convertImagesToPdfViaServer(files, orient, pSize, name) {
   }
   if (orient) fd.append('orientation', orient)
   if (pSize) fd.append('paper_size', pSize)
+  // 图片排版：手动模式传百分比，自动模式传 0；对齐 center/left/right
+  const scaleVal = imgScaleMode.value === 'manual' ? imgScalePct.value : 0
+  fd.append('scale', String(scaleVal))
+  fd.append('align', imgAlign.value)
+  if (format) fd.append('format', format)
   const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
   if (!resp.ok) throw new Error('服务端转换失败：' + await readError(resp))
   return resp.blob()
@@ -759,10 +785,15 @@ async function convertToPdf() {
   try {
     const f = selectedFile.value
     let blob
-    if (isMultiImage.value) {
-      blob = await convertImagesToPdfViaServer(
-        selectedImages.value, orientation.value, paperSize.value, downloadName.value || '合并图片.pdf'
-      )
+    let previewBlob = null
+    let previewIsImage = false
+    if (isMultiImage.value || (f && f.type.startsWith('image/'))) {
+      // 图片：同时取 PDF（用于打印）与 PNG（用于预览，可靠且实时反映缩放/对齐）
+      const list = isMultiImage.value ? selectedImages.value : [f]
+      const name = downloadName.value || '合并图片.pdf'
+      blob = await convertImagesToPdfViaServer(list, orientation.value, paperSize.value, name)
+      previewBlob = await convertImagesToPdfViaServer(list, orientation.value, paperSize.value, name, 'png')
+      previewIsImage = true
     } else if (isOfficeFile(f) || isOFDFile(f)) {
       blob = await convertOfficeToPdf(f)
     } else if (f.type.startsWith('image/')) {
@@ -772,8 +803,13 @@ async function convertToPdf() {
     }
     pdfBlob.value = blob
     clearPreviewUrl()
-    previewUrl.value = URL.createObjectURL(blob)
-    previewType.value = 'pdf'
+    if (previewIsImage && previewBlob) {
+      previewUrl.value = URL.createObjectURL(previewBlob)
+      previewType.value = 'image'
+    } else {
+      previewUrl.value = URL.createObjectURL(blob)
+      previewType.value = 'pdf'
+    }
     converted.value = true
     toast.add({ title: '转换成功', color: 'success', icon: 'i-lucide-check-circle' })
   } catch (e) {
