@@ -274,6 +274,7 @@
             :paper-size-label="paperSizeLabel"
             v-model:orientation="orientation"
             :orientation-label="orientationLabel"
+            :orientation-disabled="printMode === 'invoice'"
             :paper-dim-text="paperDimText"
             :paper-preview-style="paperPreviewStyle"
             :watermark-text="watermarkText"
@@ -448,6 +449,16 @@ watch([invoiceLayout, invoiceMargin], () => {
   if (invoiceLayoutDebounce) clearTimeout(invoiceLayoutDebounce)
   invoiceLayoutDebounce = setTimeout(() => { composeAndPreview() }, 350)
 })
+
+// 发票模式下预览纸张方向自动跟随排版：纵向2合1/4合1 → 纵向，横向2合1/4合1 → 横向。
+// 进入发票模式、或切换排版时都会触发，免去手动在预览区点「纵向/横向」。
+function syncInvoiceOrientation() {
+  if (printMode.value !== 'invoice') return
+  orientation.value = invoiceLayout.value.includes('landscape') ? 'landscape' : 'portrait'
+}
+watch([printMode, invoiceLayout], syncInvoiceOrientation)
+// 初次进入发票模式时立即同步一次（例如从标准模式切过来，layout 未变但模式变了）
+if (printMode.value === 'invoice') syncInvoiceOrientation()
 const multiImageTotalSize = computed(() => selectedImages.value.reduce((sum, f) => sum + f.size, 0))
 const canPrint = computed(() => {
   if (!printer.value) return false

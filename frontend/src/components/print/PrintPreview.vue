@@ -5,20 +5,27 @@
         <div class="flex items-center gap-2 font-semibold">
           <UIcon name="i-lucide-eye" class="w-5 h-5" />
           预览
-          <!-- 纵向/横向快捷切换（取代移动端冗余尺寸文本） -->
-          <div class="flex rounded-md border border-muted overflow-hidden ml-1">
-            <button
-              v-for="item in orientationItems"
-              :key="item.value"
-              type="button"
-              :title="item.label"
-              class="flex items-center gap-1 py-1 px-2 cursor-pointer text-xs transition"
-              :class="orientation === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
-              @click="$emit('update:orientation', item.value)"
-            >
-              <UIcon :name="item.icon" class="w-3.5 h-3.5 shrink-0" />
-              <span>{{ item.label }}</span>
-            </button>
+          <!-- 纵向/横向快捷切换：发票模式下由排版自动联动，按钮禁用并提示"自动" -->
+          <div class="flex items-center gap-1 ml-1">
+            <div class="flex rounded-md border border-muted overflow-hidden">
+              <button
+                v-for="item in orientationItems"
+                :key="item.value"
+                type="button"
+                :title="orientationDisabled ? '发票模式下随排版自动切换' : item.label"
+                class="flex items-center gap-1 py-1 px-2 cursor-pointer text-xs transition"
+                :class="[
+                  orientation === item.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated',
+                  orientationDisabled ? 'opacity-50 cursor-not-allowed' : ''
+                ]"
+                :disabled="orientationDisabled"
+                @click="$emit('update:orientation', item.value)"
+              >
+                <UIcon :name="item.icon" class="w-3.5 h-3.5 shrink-0" />
+                <span>{{ item.label }}</span>
+              </button>
+            </div>
+            <span v-if="orientationDisabled" class="text-[10px] text-muted leading-none">自动</span>
           </div>
         </div>
         <span class="text-xs sm:text-sm text-muted truncate">
@@ -73,7 +80,8 @@ const props = defineProps({
   orientationLabel: { type: String, default: '' },
   paperDimText: { type: String, default: '' },
   paperPreviewStyle: { type: Object, default: () => ({}) },
-  watermarkText: { type: String, default: '' }
+  watermarkText: { type: String, default: '' },
+  orientationDisabled: { type: Boolean, default: false }
 })
 
 defineEmits(['update:orientation'])
