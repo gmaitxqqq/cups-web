@@ -80,10 +80,12 @@ func renderPDFToPreviewPNG(ctx context.Context, pdfPath string) (string, func(),
 }
 
 // stitchPNGVertical 把多张 PNG 纵向拼接为一张（宽度取最大页宽，居中；白底）。
+// 相邻页之间留有可见间隔并画一条分隔线，避免用户把"多页预览长图"误认为"全部挤在一页"。
 func stitchPNGVertical(files []string, outPath string) error {
 	var imgs []image.Image
 	maxW := 0
 	totalH := 0
+	const sepGap = 36 // 页与页之间的间隔像素（@110DPI 约 3mm）
 	for _, f := range files {
 		rfp, err := os.Open(f)
 		if err != nil {
@@ -104,16 +106,26 @@ func stitchPNGVertical(files []string, outPath string) error {
 	if maxW <= 0 || totalH <= 0 {
 		return fmt.Errorf("preview: empty stitched image")
 	}
+	totalH += sepGap * (len(imgs) - 1) // 页间间隔
 
 	dst := image.NewRGBA(image.Rect(0, 0, maxW, totalH))
 	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
 
 	y := 0
-	for _, img := range imgs {
+	for idx, img := range imgs {
 		b := img.Bounds()
 		x := (maxW - b.Dx()) / 2 // 水平居中
 		draw.Draw(dst, image.Rect(x, y, x+b.Dx(), y+b.Dy()), img, b.Min, draw.Src)
-		y += b.Dy()
+		// 在页与页之间画一条浅灰分隔虚线，明确"这是两页"
+		if idx < len(imgs)-1 {
+			gy := y + b.Dy() + sepGap/2
+			for gx := 0; gx < maxW; gx += 18 {
+				for o := 0; o < 9 && gx+o < maxW; o++ {
+					dst.Set(gx+o, gy, color.RGBA{190, 190, 190, 255})
+				}
+			}
+		}
+		y += b.Dy() + sepGap
 	}
 
 	outF, err := os.Create(outPath)
