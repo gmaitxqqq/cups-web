@@ -111,6 +111,20 @@
                 <UButton variant="ghost" size="xs" color="error" icon="i-lucide-x" class="shrink-0" @click="removeInvoiceFile(idx)" />
               </div>
             </div>
+            <div v-if="invoiceFiles.length > 0" class="flex items-center gap-3 flex-wrap">
+              <span class="text-sm text-muted shrink-0">排版</span>
+              <div class="flex rounded-lg border border-muted overflow-hidden">
+                <label
+                  v-for="opt in invoiceLayoutItems"
+                  :key="opt.value"
+                  class="px-3 py-1 cursor-pointer text-sm transition whitespace-nowrap"
+                  :class="invoiceLayout === opt.value ? 'bg-primary text-white font-medium' : 'hover:bg-elevated'"
+                >
+                  <input type="radio" :value="opt.value" :checked="invoiceLayout === opt.value" class="sr-only" @change="invoiceLayout = opt.value" />
+                  {{ opt.label }}
+                </label>
+              </div>
+            </div>
             <UButton
               v-if="invoiceFiles.length > 0"
               variant="outline"
@@ -322,6 +336,14 @@ const idCardFrontPreview = ref('')
 const idCardBackPreview = ref('')
 const idCardPaper = ref('A4')
 const composing = ref(false)
+// 发票排版：2up=纵向2合1 / 2up-landscape=横向2合1 / 4up=纵向4合1 / 4up-landscape=横向4合1
+const invoiceLayout = ref('2up')
+const invoiceLayoutItems = [
+  { label: '纵向 2合1', value: '2up' },
+  { label: '横向 2合1', value: '2up-landscape' },
+  { label: '纵向 4合1', value: '4up' },
+  { label: '横向 4合1', value: '4up-landscape' }
+]
 
 // ─── 状态 ─────────────────────────────────────────────────
 const printing = ref(false)
@@ -384,6 +406,14 @@ watch([imgScaleMode, imgScalePct, imgAlign, imgVAlign], () => {
   if (!isImage.value || !converted.value) return
   if (imgLayoutDebounce) clearTimeout(imgLayoutDebounce)
   imgLayoutDebounce = setTimeout(() => { convertToPdf() }, 350)
+})
+
+// 发票排版切换时，若已合并预览过则防抖重新合成，使预览实时反映布局
+let invoiceLayoutDebounce = null
+watch(invoiceLayout, () => {
+  if (printMode.value !== 'invoice' || invoiceFiles.value.length === 0 || !converted.value) return
+  if (invoiceLayoutDebounce) clearTimeout(invoiceLayoutDebounce)
+  invoiceLayoutDebounce = setTimeout(() => { composeAndPreview() }, 350)
 })
 const multiImageTotalSize = computed(() => selectedImages.value.reduce((sum, f) => sum + f.size, 0))
 const canPrint = computed(() => {
@@ -1149,6 +1179,8 @@ async function composeAndPreview() {
     if (printMode.value === 'invoice') {
       fd.append('mode', 'invoice')
       fdPng.append('mode', 'invoice')
+      fd.append('layout', invoiceLayout.value)
+      fdPng.append('layout', invoiceLayout.value)
       for (const f of invoiceFiles.value) {
         fd.append('files', f, f.name)
         fdPng.append('files', f, f.name)

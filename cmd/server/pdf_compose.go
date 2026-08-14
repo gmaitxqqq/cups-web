@@ -36,9 +36,29 @@ type composePage struct {
 	imgCfg  image.Config
 }
 
-func composeInvoice2Up(ctx context.Context, fileHeaders []*multipart.FileHeader) (string, func(), error) {
+// composeInvoice 把多张发票/文档 N 合 1 拼到同一张 A4 上。
+// layout 决定输出纸张方向 (P/L) 与网格 (行 × 列)：
+//   "2up"            -> 纵向2合1：A4 纵向，2 行 1 列（上下两格）
+//   "2up-landscape"  -> 横向2合1：A4 横向，1 行 2 列（左右两格）
+//   "4up"            -> 纵向4合1：A4 纵向，2 行 2 列
+//   "4up-landscape"  -> 横向4合1：A4 横向，2 行 2 列
+// 任意未知值回退到纵向2合1，保证向后兼容。
+func composeInvoice(ctx context.Context, fileHeaders []*multipart.FileHeader, layout string) (string, func(), error) {
 	if len(fileHeaders) == 0 {
 		return "", nil, errors.New("no files provided")
+	}
+
+	var orient string
+	var gridRows, gridCols int
+	switch layout {
+	case "2up-landscape":
+		orient, gridRows, gridCols = "L", 1, 2
+	case "4up":
+		orient, gridRows, gridCols = "P", 2, 2
+	case "4up-landscape":
+		orient, gridRows, gridCols = "L", 2, 2
+	default: // "2up" 及未知值：纵向2合1
+		orient, gridRows, gridCols = "P", 2, 1
 	}
 
 	tmpDir, err := os.MkdirTemp("", "compose-invoice-")
@@ -57,33 +77,43 @@ func composeInvoice2Up(ctx context.Context, fileHeaders []*multipart.FileHeader)
 		return "", nil, errors.New("no pages to compose")
 	}
 
-	pdf := gofpdf.New("P", "mm", "A4", "")
+	var pageW, pageH float64
+	if orient == "L" {
+		pageW, pageH = 297.0, 210.0
+	} else {
+		pageW, pageH = 210.0, 297.0
+	}
+	// 用 gofpdf.New 直接指定方向，能正确写出横向/纵向 MediaBox
+	// （NewCustom + OrientationStr 在横向时不会正确翻转尺寸）。
+	pdf := gofpdf.New(orient, "mm", "A4", "")
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 
 	imp := gofpdi.NewImporter()
 
-	pageW, pageH := 210.0, 297.0
-	halfH := pageH / 2
-	slotW := pageW - 2*composeMarginMM
-	slotH := halfH - 2*composeMarginMM
+	cellW := pageW / float64(gridCols)
+	cellH := pageH / float64(gridRows)
+	perPage := gridRows * gridCols
 
-	for i := 0; i < len(pages); i += 2 {
+	for i := 0; i < len(pages); i += perPage {
 		pdf.AddPage()
-
-		if err := placePageInSlot(pdf, imp, &pages[i], composeMarginMM, composeMarginMM, slotW, slotH); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("page %d: %w", i+1, err)
-		}
-
-		drawDashLine(pdf, composeMarginMM, halfH, pageW-composeMarginMM, halfH)
-
-		if i+1 < len(pages) {
-			if err := placePageInSlot(pdf, imp, &pages[i+1], composeMarginMM, halfH+composeMarginMM, slotW, slotH); err != nil {
+		for s := 0; s < perPage; s++ {
+			idx := i + s
+			if idx >= len(pages) {
+				break
+			}
+			row := s / gridCols
+			col := s % gridCols
+			slotX := float64(col)*cellW + composeMarginMM
+			slotY := float64(row)*cellH + composeMarginMM
+			slotW := cellW - 2*composeMarginMM
+			slotH := cellH - 2*composeMarginMM
+			if err := placePageInSlot(pdf, imp, &pages[idx], slotX, slotY, slotW, slotH); err != nil {
 				cleanup()
-				return "", nil, fmt.Errorf("page %d: %w", i+2, err)
+				return "", nil, fmt.Errorf("page %d: %w", idx+1, err)
 			}
 		}
+		drawGridDashLines(pdf, pageW, pageH, gridCols, gridRows)
 	}
 
 	outPath := filepath.Join(tmpDir, "invoice_composed.pdf")
@@ -92,6 +122,19 @@ func composeInvoice2Up(ctx context.Context, fileHeaders []*multipart.FileHeader)
 		return "", nil, err
 	}
 	return outPath, cleanup, nil
+}
+
+// drawGridDashLines 在合成页上画格子分隔虚线（列分隔为竖线、行分隔为横线），
+// 方便打印后沿虚线裁剪。perPage=1 时不画线。
+func drawGridDashLines(pdf *gofpdf.Fpdf, pageW, pageH float64, gridCols, gridRows int) {
+	for c := 1; c < gridCols; c++ {
+		x := float64(c) * pageW / float64(gridCols)
+		drawDashLine(pdf, x, 0, x, pageH)
+	}
+	for r := 1; r < gridRows; r++ {
+		y := float64(r) * pageH / float64(gridRows)
+		drawDashLine(pdf, 0, y, pageW, y)
+	}
 }
 
 const (

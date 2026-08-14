@@ -38,7 +38,8 @@ func composeHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch mode {
 	case "invoice":
-		outPath, cleanup, err = composeInvoice2Up(ctx, headers)
+		layout := r.FormValue("layout")
+		outPath, cleanup, err = composeInvoice(ctx, headers, layout)
 	case "id_card":
 		paper := r.FormValue("paper")
 		if paper == "" {
