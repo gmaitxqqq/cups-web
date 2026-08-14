@@ -174,7 +174,7 @@ func getOrientationCode(orientation string) string {
 // scalePct: 0 = 自动适应（等比缩放到最大可放区域，保持宽高比）；1-100 = 在自动适应基础上再乘以该百分比。
 // align: center/left/right，控制水平对齐；垂直始终居中。
 // 返回 (x, y, w, h)，可直接传给 gofpdf 的 ImageOptions。
-func computeImagePlacement(imgW, imgH, pageW, pageH, margin, scalePct, align float64) (x, y, w, h float64) {
+func computeImagePlacement(imgW, imgH, pageW, pageH, margin, scalePct float64, align string) (x, y, w, h float64) {
 	maxW := pageW - 2*margin
 	maxH := pageH - 2*margin
 	if maxW <= 0 {
