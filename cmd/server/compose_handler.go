@@ -1,9 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 )
 
@@ -64,23 +64,20 @@ func composeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cleanup()
 
-	// 预览专用：format=png 时把合成结果渲染成 PNG 返回，前端用 <img> 显示，
-	// 彻底绕过 pdf.js（worker 在受限部署中可能无法加载）。
+	// 预览专用：format=png 时把合成结果逐页渲染成 PNG，以 JSON 数组返回，
+	// 前端逐页展示并提供翻页（左右箭头 / 1/N 计数），彻底绕过 pdf.js。
 	if r.FormValue("format") == "png" {
-		pngPath, pngCleanup, perr := renderPDFToPreviewPNG(ctx, outPath)
+		pages, pngCleanup, perr := renderPDFToPreviewPages(ctx, outPath)
 		if perr != nil {
 			writeJSONError(w, http.StatusInternalServerError, "preview render failed: "+perr.Error())
 			return
 		}
 		defer pngCleanup()
-		data, rerr := os.ReadFile(pngPath)
-		if rerr != nil {
-			writeJSONError(w, http.StatusInternalServerError, "preview read failed")
-			return
-		}
-		w.Header().Set("Content-Type", "image/png")
-		w.Header().Set("Content-Disposition", "inline; filename=\"preview.png\"")
-		w.Write(data)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"total": len(pages),
+			"pages": pages,
+		})
 		return
 	}
 

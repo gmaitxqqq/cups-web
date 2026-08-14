@@ -247,6 +247,24 @@
       <!-- 右栏：预览 + 打印记录 + 打印机状态 -->
       <div class="lg:col-span-3 space-y-4">
         <div class="lg:sticky lg:top-4 space-y-4">
+          <!-- 预览翻页（多页时显示：上一页 / 1 N / 下一页） -->
+          <div v-if="previewPages.length > 1" class="flex items-center justify-center gap-3 py-1.5">
+            <UButton
+              variant="soft"
+              size="sm"
+              icon="i-lucide-chevron-left"
+              :disabled="previewPageIndex === 0"
+              @click="prevPreviewPage"
+            />
+            <span class="text-sm tabular-nums text-muted select-none">{{ previewPageIndex + 1 }} / {{ previewPages.length }}</span>
+            <UButton
+              variant="soft"
+              size="sm"
+              icon="i-lucide-chevron-right"
+              :disabled="previewPageIndex >= previewPages.length - 1"
+              @click="nextPreviewPage"
+            />
+          </div>
           <PrintPreview
             :selected-file="selectedFile"
             :is-multi-image="isMultiImage"
@@ -292,6 +310,8 @@ const printers = ref([])
 const selectedFile = ref(null)
 const previewUrl = ref('')
 const previewType = ref('')
+const previewPages = ref([])
+const previewPageIndex = ref(0)
 const textPreview = ref('')
 const converting = ref(false)
 const converted = ref(false)
@@ -495,9 +515,25 @@ const paperPreviewStyle = computed(() => {
 // ─── 文件操作 ─────────────────────────────────────────────
 function clearPreviewUrl() {
   if (previewUrl.value) {
-    try { URL.revokeObjectURL(previewUrl.value) } catch (_) { /* 忽略 */ }
+    try { URL.revokeObjectURL(previewUrl.value) } catch (_) { /* 忽略 data: URL 等情况 */ }
   }
   previewUrl.value = ''
+  previewPages.value = []
+  previewPageIndex.value = 0
+}
+
+// 预览翻页：在已生成的逐页列表里前后切换当前显示的页
+function prevPreviewPage() {
+  if (previewPageIndex.value > 0) {
+    previewPageIndex.value--
+    previewUrl.value = previewPages.value[previewPageIndex.value]
+  }
+}
+function nextPreviewPage() {
+  if (previewPageIndex.value < previewPages.value.length - 1) {
+    previewPageIndex.value++
+    previewUrl.value = previewPages.value[previewPageIndex.value]
+  }
 }
 
 function clearFile() {
@@ -803,6 +839,13 @@ async function convertImagesToPdfViaServer(files, orient, pSize, name, format = 
   if (format) fd.append('format', format)
   const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
   if (!resp.ok) throw new Error('服务端转换失败：' + await readError(resp))
+  if (format === 'png') {
+    const data = await resp.json()
+    if (!data || !Array.isArray(data.pages) || data.pages.length === 0) {
+      throw new Error('预览生成失败')
+    }
+    return data
+  }
   return resp.blob()
 }
 
@@ -851,8 +894,15 @@ async function convertToPdf() {
     pdfBlob.value = blob
     clearPreviewUrl()
     if (previewIsImage && previewBlob) {
-      previewUrl.value = URL.createObjectURL(previewBlob)
-      previewType.value = 'image'
+      // 后端返回逐页预览 { total, pages:[dataURL,...] }
+      if (previewBlob.pages && previewBlob.pages.length > 0) {
+        previewPages.value = previewBlob.pages
+        previewPageIndex.value = 0
+        previewUrl.value = previewBlob.pages[0]
+        previewType.value = 'image'
+      } else {
+        previewType.value = 'text'
+      }
     } else {
       previewUrl.value = URL.createObjectURL(blob)
       previewType.value = 'pdf'
@@ -880,11 +930,16 @@ async function applyGsNormalization() {
     fd.append('format', 'png')
     const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) throw new Error(await readError(resp))
-    const blob = await resp.blob()
+    const data = await resp.json()
     // 用户在期间换/清了文件，丢弃结果
     if (selectedFile.value !== f) return
+    if (!data || !Array.isArray(data.pages) || data.pages.length === 0) {
+      throw new Error('预览生成失败')
+    }
     clearPreviewUrl()
-    previewUrl.value = URL.createObjectURL(blob)
+    previewPages.value = data.pages
+    previewPageIndex.value = 0
+    previewUrl.value = data.pages[0]
     previewType.value = 'image'
     textPreview.value = ''
     gsApplied.value = true
@@ -909,11 +964,16 @@ async function autoRasterizePdf(f) {
     fd.append('format', 'png')
     const resp = await apiFetch('/api/convert', { method: 'POST', body: fd }, () => emit('logout'))
     if (!resp.ok) throw new Error(await readError(resp))
-    const blob = await resp.blob()
+    const data = await resp.json()
     // 用户在转换期间已切换/清空文件，丢弃结果
     if (selectedFile.value !== f) return
+    if (!data || !Array.isArray(data.pages) || data.pages.length === 0) {
+      throw new Error('预览生成失败')
+    }
     clearPreviewUrl()
-    previewUrl.value = URL.createObjectURL(blob)
+    previewPages.value = data.pages
+    previewPageIndex.value = 0
+    previewUrl.value = data.pages[0]
     previewType.value = 'image'
     textPreview.value = ''
     gsApplied.value = true
@@ -1220,14 +1280,22 @@ async function composeAndPreview() {
     clearPreviewUrl()
     pdfBlob.value = blob
 
-    // 2) 预览：优先用后端渲染的 PNG（绕开 pdf.js）；失败则提示不影响打印
+    // 2) 预览：后端逐页渲染成 PNG，返回 JSON { total, pages:[dataURL,...] }，
+    //    前端逐页展示并提供翻页；失败则提示不影响打印。
     try {
       const pngResp = await apiFetch('/api/compose?format=png', { method: 'POST', body: fdPng }, () => emit('logout'))
       if (pngResp.ok) {
-        const pngBlob = await pngResp.blob()
-        previewUrl.value = URL.createObjectURL(pngBlob)
-        previewType.value = 'image'
-        textPreview.value = ''
+        const data = await pngResp.json()
+        if (data && Array.isArray(data.pages) && data.pages.length > 0) {
+          previewPages.value = data.pages
+          previewPageIndex.value = 0
+          previewUrl.value = data.pages[0]
+          previewType.value = 'image'
+          textPreview.value = ''
+        } else {
+          previewType.value = 'text'
+          textPreview.value = '预览生成失败（不影响打印，可直接点击"开始打印"）。'
+        }
       } else {
         previewType.value = 'text'
         textPreview.value = '预览生成失败（不影响打印，可直接点击"开始打印"）。'
