@@ -125,6 +125,17 @@
                 </label>
               </div>
             </div>
+            <div v-if="invoiceFiles.length > 0" class="flex items-center gap-3">
+              <span class="text-sm text-muted shrink-0 whitespace-nowrap">边距: {{ invoiceMargin }}mm</span>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                step="1"
+                v-model.number="invoiceMargin"
+                class="flex-1 min-w-[120px] accent-primary"
+              />
+            </div>
             <UButton
               v-if="invoiceFiles.length > 0"
               variant="outline"
@@ -344,6 +355,8 @@ const invoiceLayoutItems = [
   { label: '纵向 4合1', value: '4up' },
   { label: '横向 4合1', value: '4up-landscape' }
 ]
+// 发票边距：单位 mm，默认 5mm，范围 0~20mm
+const invoiceMargin = ref(5)
 
 // ─── 状态 ─────────────────────────────────────────────────
 const printing = ref(false)
@@ -408,9 +421,9 @@ watch([imgScaleMode, imgScalePct, imgAlign, imgVAlign], () => {
   imgLayoutDebounce = setTimeout(() => { convertToPdf() }, 350)
 })
 
-// 发票排版切换时，若已合并预览过则防抖重新合成，使预览实时反映布局
+// 发票排版切换或边距变化时，若已合并预览过则防抖重新合成
 let invoiceLayoutDebounce = null
-watch(invoiceLayout, () => {
+watch([invoiceLayout, invoiceMargin], () => {
   if (printMode.value !== 'invoice' || invoiceFiles.value.length === 0 || !converted.value) return
   if (invoiceLayoutDebounce) clearTimeout(invoiceLayoutDebounce)
   invoiceLayoutDebounce = setTimeout(() => { composeAndPreview() }, 350)
@@ -1180,7 +1193,9 @@ async function composeAndPreview() {
       fd.append('mode', 'invoice')
       fdPng.append('mode', 'invoice')
       fd.append('layout', invoiceLayout.value)
+      fd.append('margin', String(invoiceMargin.value))
       fdPng.append('layout', invoiceLayout.value)
+      fdPng.append('margin', String(invoiceMargin.value))
       for (const f of invoiceFiles.value) {
         fd.append('files', f, f.name)
         fdPng.append('files', f, f.name)

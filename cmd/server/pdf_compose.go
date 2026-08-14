@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	composeMarginMM   = 10.0
-	dashLineLenMM     = 3.0
-	dashLineGapMM     = 2.0
-	dashLineGrayLevel = 180
+	defaultComposeMarginMM = 5.0
+	dashLineLenMM          = 3.0
+	dashLineGapMM          = 2.0
+	dashLineGrayLevel      = 180
 )
 
 type composePage struct {
@@ -43,7 +43,7 @@ type composePage struct {
 //   "4up"            -> 纵向4合1：A4 纵向，2 行 2 列
 //   "4up-landscape"  -> 横向4合1：A4 横向，2 行 2 列
 // 任意未知值回退到纵向2合1，保证向后兼容。
-func composeInvoice(ctx context.Context, fileHeaders []*multipart.FileHeader, layout string) (string, func(), error) {
+func composeInvoice(ctx context.Context, fileHeaders []*multipart.FileHeader, layout string, marginMM float64) (string, func(), error) {
 	if len(fileHeaders) == 0 {
 		return "", nil, errors.New("no files provided")
 	}
@@ -95,6 +95,15 @@ func composeInvoice(ctx context.Context, fileHeaders []*multipart.FileHeader, la
 	cellH := pageH / float64(gridRows)
 	perPage := gridRows * gridCols
 
+	// 边距边界保护：0 ~ 半单元格宽度/高度（防止负槽位或重叠）
+	if marginMM < 0 {
+		marginMM = 0
+	}
+	maxMargin := math.Min(cellW, cellH) / 2
+	if marginMM > maxMargin {
+		marginMM = maxMargin
+	}
+
 	for i := 0; i < len(pages); i += perPage {
 		pdf.AddPage()
 		for s := 0; s < perPage; s++ {
@@ -104,10 +113,10 @@ func composeInvoice(ctx context.Context, fileHeaders []*multipart.FileHeader, la
 			}
 			row := s / gridCols
 			col := s % gridCols
-			slotX := float64(col)*cellW + composeMarginMM
-			slotY := float64(row)*cellH + composeMarginMM
-			slotW := cellW - 2*composeMarginMM
-			slotH := cellH - 2*composeMarginMM
+			slotX := float64(col)*cellW + marginMM
+			slotY := float64(row)*cellH + marginMM
+			slotW := cellW - 2*marginMM
+			slotH := cellH - 2*marginMM
 			if err := placePageInSlot(pdf, imp, &pages[idx], slotX, slotY, slotW, slotH); err != nil {
 				cleanup()
 				return "", nil, fmt.Errorf("page %d: %w", idx+1, err)

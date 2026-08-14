@@ -4,6 +4,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 func composeHandler(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,13 @@ func composeHandler(w http.ResponseWriter, r *http.Request) {
 	switch mode {
 	case "invoice":
 		layout := r.FormValue("layout")
-		outPath, cleanup, err = composeInvoice(ctx, headers, layout)
+		marginMM := defaultComposeMarginMM
+		if mv := r.FormValue("margin"); mv != "" {
+			if f, err := strconv.ParseFloat(mv, 64); err == nil && f >= 0 {
+				marginMM = f
+			}
+		}
+		outPath, cleanup, err = composeInvoice(ctx, headers, layout, marginMM)
 	case "id_card":
 		paper := r.FormValue("paper")
 		if paper == "" {
