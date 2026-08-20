@@ -248,22 +248,25 @@
       <div class="lg:col-span-3 space-y-4">
         <div class="lg:sticky lg:top-4 space-y-4">
           <!-- 预览翻页（多页时显示：上一页 / 1 N / 下一页） -->
-          <div v-if="previewPages.length > 1" class="flex items-center justify-center gap-3 py-1.5">
-            <UButton
-              variant="soft"
-              size="sm"
-              icon="i-lucide-chevron-left"
-              :disabled="previewPageIndex === 0"
-              @click="prevPreviewPage"
-            />
-            <span class="text-sm tabular-nums text-muted select-none">{{ previewPageIndex + 1 }} / {{ previewPages.length }}</span>
-            <UButton
-              variant="soft"
-              size="sm"
-              icon="i-lucide-chevron-right"
-              :disabled="previewPageIndex >= previewPages.length - 1"
-              @click="nextPreviewPage"
-            />
+          <div v-if="previewPages.length > 1" class="space-y-1.5">
+            <p class="text-center text-xs text-muted">多页预览 · 点击左右箭头可翻页查看每一页</p>
+            <div class="flex items-center justify-center gap-3 py-1.5">
+              <UButton
+                variant="soft"
+                size="sm"
+                icon="i-lucide-chevron-left"
+                :disabled="previewPageIndex === 0"
+                @click="prevPreviewPage"
+              />
+              <span class="text-sm tabular-nums text-muted select-none">{{ previewPageIndex + 1 }} / {{ previewPages.length }}</span>
+              <UButton
+                variant="soft"
+                size="sm"
+                icon="i-lucide-chevron-right"
+                :disabled="previewPageIndex >= previewPages.length - 1"
+                @click="nextPreviewPage"
+              />
+            </div>
           </div>
           <PrintPreview
             :selected-file="selectedFile"
