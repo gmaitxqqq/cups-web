@@ -123,6 +123,11 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 		if normRes, nerr := normalizePDFToImagePDF(countCtx, storedAbs); nerr == nil {
 			printPath = normRes.OutputPath
 			printCleanup = normRes.Cleanup
+			// 用光栅化实际渲染出的真实页数覆盖之前 unidoc 的误判
+			// （加密 / 特殊结构 PDF 会被 countPDFPages 数成 1 页）。
+			if normRes.Pages > 0 {
+				pages = normRes.Pages
+			}
 			log.Printf("[print] pdf normalized via rasterize (method=%s) before printing", normRes.Method)
 		} else if normRes, nerr := normalizePDF(countCtx, storedAbs); nerr == nil && normRes.Method != "passthrough" {
 			// 光栅化不可用时降级到 pdfwrite 路径

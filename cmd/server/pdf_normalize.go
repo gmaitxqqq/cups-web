@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +32,10 @@ type normalizePDFResult struct {
 	Cleanup    func()
 	Method     string
 	Warnings   []string
+	// Pages 是本次标准化后产物的真实页数。
+	// 对加密/特殊结构的 PDF，unidoc 的 countPDFPages 可能误判（如数成 1 页），
+	// 因此由光栅化路径在渲染后按 GS 实际产出的图片数回填，供调用方（打印/预览）使用真实页数。
+	Pages int
 }
 
 // normalizePDF 把任意 PDF 转成更兼容的版本：
@@ -503,57 +510,82 @@ func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePD
 		return nil, fmt.Errorf("rasterize: ghostscript %w", errBinaryNotInstalled)
 	}
 
-	numPages, err := countPDFPages(inputPath)
-	if err != nil || numPages < 1 {
-		numPages = 1
-	}
-
-	// 获取原始页面尺寸，用于创建匹配的图片 PDF 页面
-	pageW_pt, pageH_pt := getPDFPageDimensions(inputPath)
-	pageW_mm := ptToMm(pageW_pt)
-	pageH_mm := ptToMm(pageH_pt)
-
 	tmpDir, err := os.MkdirTemp("", "pdf-rasterize-")
 	if err != nil {
 		return nil, fmt.Errorf("rasterize: tmpdir: %w", err)
 	}
 	cleanup := func() { _ = os.RemoveAll(tmpDir) }
 
-	// 逐页渲染成 JPEG
-	for p := 1; p <= numPages; p++ {
-		outPath := filepath.Join(tmpDir, fmt.Sprintf("page_%04d.jpg", p))
-		args := []string{
-			"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
-			"-sDEVICE=jpeg",
-			fmt.Sprintf("-dJPEGQ=%d", imageNormalizeJPEGQ),
-			fmt.Sprintf("-r%d", imageNormalizeDPI),
-			fmt.Sprintf("-dFirstPage=%d", p),
-			fmt.Sprintf("-dLastPage=%d", p),
-			"-sOutputFile=" + outPath,
-			inputPath,
-		}
-		cmd := exec.CommandContext(ctx, gsBin, args...)
-		cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("rasterize: gs render page %d failed: %w - %s", p, err, firstErrorLine(string(out)))
-		}
+	// 一次调用把 PDF 的每一页渲染成一张 JPEG（命名 page_0001.jpg / page_0002.jpg …）。
+	// 关键：页数不再依赖 unidoc 的 countPDFPages（加密/特殊结构 PDF 会被它误判成 1 页，
+	// 导致只光栅化并打包首页）。GS 是真正的渲染引擎，它实际产出了几张图，就有几页。
+	pagePat := filepath.Join(tmpDir, "page_%04d.jpg")
+	args := []string{
+		"-dNOPAUSE", "-dBATCH", "-dSAFER", "-dQUIET",
+		"-sDEVICE=jpeg",
+		fmt.Sprintf("-dJPEGQ=%d", imageNormalizeJPEGQ),
+		fmt.Sprintf("-r%d", imageNormalizeDPI),
+		fmt.Sprintf("-sOutputFile=%s", pagePat),
+		inputPath,
+	}
+	cmd := exec.CommandContext(ctx, gsBin, args...)
+	cmd.Env = append(os.Environ(), "LANG=C.UTF-8", "LC_ALL=C.UTF-8")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("rasterize: gs render failed: %w - %s", err, firstErrorLine(string(out)))
 	}
 
-	// 用 gofpdf 把图片打包成 PDF，使用与原始 PDF 匹配的页面尺寸
+	// 收集 GS 实际产出的各页 JPEG（按页码数字升序），这才是真实页数。
+	matches, _ := filepath.Glob(filepath.Join(tmpDir, "page_*.jpg"))
+	reNum := regexp.MustCompile(`(\d+)\.jpg$`)
+	sort.Slice(matches, func(i, j int) bool {
+		ai, bi := 0, 0
+		if m := reNum.FindStringSubmatch(matches[i]); m != nil {
+			ai, _ = strconv.Atoi(m[1])
+		}
+		if m := reNum.FindStringSubmatch(matches[j]); m != nil {
+			bi, _ = strconv.Atoi(m[1])
+		}
+		return ai < bi
+	})
+	if len(matches) == 0 {
+		cleanup()
+		return nil, fmt.Errorf("rasterize: gs produced no page JPEG for %s", filepath.Base(inputPath))
+	}
+	numPages := len(matches)
+
+	// 用 gofpdf 把图片逐页打包成 PDF。每页的尺寸直接取各自渲染图片的像素尺寸
+	// （按渲染 DPI 换算成 mm），彻底不依赖 unidoc 的页面尺寸读取，
+	// 对加密 / 多尺寸 / 特殊结构 PDF 都稳健。
 	outPath := filepath.Join(tmpDir, "rasterized.pdf")
 	pdf := gofpdf.NewCustom(&gofpdf.InitType{
 		UnitStr: "mm",
-		Size:    gofpdf.SizeType{Wd: pageW_mm, Ht: pageH_mm},
+		Size:    gofpdf.SizeType{Wd: 1, Ht: 1}, // 首页尺寸在循环里用 AddPageFormat 覆盖
 	})
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 
-	for p := 1; p <= numPages; p++ {
-		imgPath := filepath.Join(tmpDir, fmt.Sprintf("page_%04d.jpg", p))
-		pdf.AddPage()
+	for _, imgPath := range matches {
+		// 读取该页渲染图片的像素尺寸，换算为页面 mm（渲染 DPI 已知）
+		var wMm, hMm float64
+		if f, ferr := os.Open(imgPath); ferr == nil {
+			if cfg, _, derr := image.DecodeConfig(f); derr == nil && cfg.Width > 0 && cfg.Height > 0 {
+				wMm = float64(cfg.Width) / float64(imageNormalizeDPI) * 25.4
+				hMm = float64(cfg.Height) / float64(imageNormalizeDPI) * 25.4
+			}
+			f.Close()
+		}
+		if wMm <= 0 || hMm <= 0 {
+			// 兜底：读不到尺寸时退回 A4
+			wMm, hMm = 210.0, 297.0
+		}
+		orient := "P"
+		if wMm > hMm {
+			orient = "L"
+		}
+		pdf.AddPageFormat(orient, gofpdf.SizeType{Wd: wMm, Ht: hMm})
 		// 图片铺满整页，保持原始比例（无拉伸/裁剪）
-		pdf.Image(imgPath, 0, 0, pageW_mm, pageH_mm, false, "", 0, "")
+		pdf.Image(imgPath, 0, 0, wMm, hMm, false, "", 0, "")
 	}
 
 	if err := pdf.OutputFileAndClose(outPath); err != nil {
@@ -561,13 +593,13 @@ func normalizePDFToImagePDF(ctx context.Context, inputPath string) (*normalizePD
 		return nil, fmt.Errorf("rasterize: gofpdf pack failed: %w", err)
 	}
 
-	log.Printf("[pdf-normalize] method=rasterize pages=%d dpi=%d pageSize=%.1fx%.1fpt (%.1fx%.1fmm) in=%s out=%s",
-		numPages, imageNormalizeDPI, pageW_pt, pageH_pt, pageW_mm, pageH_mm,
-		filepath.Base(inputPath), filepath.Base(outPath))
+	log.Printf("[pdf-normalize] method=rasterize pages=%d dpi=%d in=%s out=%s",
+		numPages, imageNormalizeDPI, filepath.Base(inputPath), filepath.Base(outPath))
 
 	return &normalizePDFResult{
 		OutputPath: outPath,
 		Cleanup:    cleanup,
 		Method:     "rasterize",
+		Pages:      numPages,
 	}, nil
 }
