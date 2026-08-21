@@ -883,6 +883,17 @@ async function convertOfficeToPdf(file) {
   return resp.blob()
 }
 
+// 把已经转好的 PDF（Blob）通过后端 GS 光栅化为逐页 PNG 预览，返回 { total, pages:[dataURL] }。
+// 用于 Office/OFD 转换后的预览：复用转换产物的字节，避免重复调用 libreoffice，
+// 且与直接上传 PDF 的预览路径（autoRasterizePdf）完全一致，彻底绕开 pdf.js。
+async function rasterizePdfToPages(pdfBlob, pdfName) {
+  const fd = new FormData()
+  fd.append('file', pdfBlob, pdfName)
+  const resp = await apiFetch('/api/convert?format=png', { method: 'POST', body: fd }, () => emit('logout'))
+  if (!resp.ok) throw new Error(await readError(resp))
+  return await resp.json()
+}
+
 async function convertToPdf() {
   if (!selectedFile.value && !isMultiImage.value) return
   converting.value = true
@@ -891,6 +902,7 @@ async function convertToPdf() {
     let blob
     let previewBlob = null
     let previewIsImage = false
+    let previewFallbackText = ''
     if (isMultiImage.value || (f && f.type.startsWith('image/'))) {
       // 图片：同时取 PDF（用于打印）与 PNG（用于预览，可靠且实时反映缩放/对齐）
       const list = isMultiImage.value ? selectedImages.value : [f]
@@ -900,23 +912,49 @@ async function convertToPdf() {
       previewIsImage = true
     } else if (isOfficeFile(f) || isOFDFile(f)) {
       blob = await convertOfficeToPdf(f)
+      // 用 GS 光栅化生成逐页 PNG 预览，绕开 pdf.js（受限部署环境 worker 易失败），
+      // 与直接上传 PDF 的预览路径（autoRasterizePdf）保持一致。复用转好的 PDF 字节，不重复转换。
+      try {
+        const pngResp = await rasterizePdfToPages(blob, f.name.replace(/\.[^/.]+$/, '') + '.pdf')
+        if (pngResp && Array.isArray(pngResp.pages) && pngResp.pages.length > 0) {
+          previewBlob = pngResp
+          previewIsImage = true
+        }
+      } catch (_) {
+        previewFallbackText = 'Office/OFD 预览生成失败（不影响打印，可直接点击"开始打印"）。'
+      }
     } else if (f.type.startsWith('image/')) {
       blob = await convertImagesToPdfViaServer([f], orientation.value, paperSize.value)
+    } else if (f.type === 'application/pdf') {
+      // PDF：打印直接使用原始字节（pdfBlob=f），无需转换；预览走 GS 光栅化
+      // （与上传即预览的 autoRasterizePdf 完全一致），彻底绕开 pdf.js，
+      // 避免受限部署中 pdf.js worker 失败导致"PDF 预览加载失败"。
+      // 关键：绝不能把 PDF 丢进 convertTextViaServer 再设 previewType='pdf'（旧 bug）。
+      blob = f
+      try {
+        const pngResp = await rasterizePdfToPages(f, f.name)
+        if (pngResp && Array.isArray(pngResp.pages) && pngResp.pages.length > 0) {
+          previewBlob = pngResp
+          previewIsImage = true
+        }
+      } catch (_) {
+        previewFallbackText = 'PDF 预览生成失败（不影响打印，可直接点击"开始打印"）。'
+      }
     } else {
       blob = await convertTextViaServer(f, orientation.value, paperSize.value)
     }
     pdfBlob.value = blob
     clearPreviewUrl()
-    if (previewIsImage && previewBlob) {
-      // 后端返回逐页预览 { total, pages:[dataURL,...] }
-      if (previewBlob.pages && previewBlob.pages.length > 0) {
-        previewPages.value = previewBlob.pages
-        previewPageIndex.value = 0
-        previewUrl.value = previewBlob.pages[0]
-        previewType.value = 'image'
-      } else {
-        previewType.value = 'text'
-      }
+    if (previewIsImage && previewBlob && previewBlob.pages && previewBlob.pages.length > 0) {
+      // 后端返回逐页预览 { total, pages:[dataURL,...] }（图片 / Office 转 PDF 均走此 GS 光栅化路径）
+      previewPages.value = previewBlob.pages
+      previewPageIndex.value = 0
+      previewUrl.value = previewBlob.pages[0]
+      previewType.value = 'image'
+      textPreview.value = ''
+    } else if (previewFallbackText) {
+      previewType.value = 'text'
+      textPreview.value = previewFallbackText
     } else {
       previewUrl.value = URL.createObjectURL(blob)
       previewType.value = 'pdf'

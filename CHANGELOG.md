@@ -4,6 +4,18 @@
 
 ---
 
+## v1.1.2（2026-08-21，补丁）
+
+### 修复（Fixes）
+- **docx / 手动转换的 PDF 预览失败（"PDF 预览加载失败"）**：根因为前端 `convertToPdf` 对 `application/pdf` 文件缺少专门分支，落入 `else` 的「文本转换 + `previewType='pdf'`」路径，强制走 pdf.js 渲染；而受限部署环境中 pdf.js worker 易加载失败，于是报错「PDF 预览加载失败」（打印本身正常）。
+  修复后 `convertToPdf` 增加 PDF 专属分支：**打印直接使用原始字节**，**预览走 Ghostscript 光栅化**（`rasterizePdfToPages`，与上传即预览的 `autoRasterizePdf` 完全一致），彻底绕开 pdf.js。Office 文档（如 Word `.docx`）点击「转换为 PDF」时也复用同一 GS 光栅化预览路径。
+  实测「2020总队运维情况总结.docx」：后端 libreoffice 转 PDF（该文件实际 8 个真实页面，页面树 `/Count` 被 libreoffice 误写为 13，属源文件瑕疵，GS 渲染 8 页为正确结果）→ GS 逐页预览正确返回 **8 页**；手动转换的 PDF 上传同理返回 8 页 PNG 预览，不再走 pdf.js。
+
+### 部署说明
+- 升级后务必浏览器 **Ctrl+Shift+R 强刷**（前端 hash 由 `BQhrJ2Yz` 变更为 `D48HY_Hb`），否则浏览器沿用旧缓存、仍走 pdf.js。
+
+---
+
 ## v1.1.0（2026-08-15）
 
 ### 新增（Features）
