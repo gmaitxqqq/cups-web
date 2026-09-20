@@ -4,6 +4,19 @@
 
 ---
 
+## v1.1.5（2026-09-21，补丁）
+
+### 改进（Improvements）
+- **镜像额外打固定版本标签 `vX.Y.Z`**：`.github/workflows/build.yml` 的 `on.push` 增加 `tags: ['v*']` 触发；`docker/metadata-action` 增加 `type=match,pattern=v\d+\.\d+\.\d+`，在推送发版 tag（如 `v1.1.5`）时额外给镜像打上 `ghcr.io/gmaitxqqq/cups-web:v1.1.5` 固定标签。
+  这样以后在别的机器上可以直接 `docker pull ghcr.io/gmaitxqqq/cups-web:v1.1.5` 锁定版本，不再只能依赖会漂移的 `:latest`，彻底消除「拉下来到底是哪个版本」的歧义。
+- `:latest` 在每次推 `master` 时仍会刷新（版本号由 `git describe` 决定，领先 tag 时形如 `v1.1.5-1-gabcdef`）。
+
+### 部署说明
+- 纯发版/构建链路改进，Go 业务逻辑与前端口径与 v1.1.4 一致，前端 hash 未变，无需强刷。
+- 推 `v1.1.5` tag 会触发 GitHub Actions：构建镜像并同时打 `latest` 与 `v1.1.5` 两个标签。
+
+---
+
 ## v1.1.4（2026-09-20，补丁）
 
 ### 修复（Fixes）

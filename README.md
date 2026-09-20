@@ -296,6 +296,8 @@ ssh root@<生产机IP> 'docker cp /tmp/cups-web <容器名>:/cups-web && docker 
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| **v1.1.5** | 2026-09-21 | 发版/构建改进：镜像额外打固定版本标签 `vX.Y.Z`（tag 推送时），便于 pin 版本、避免只能依赖会漂移的 `:latest`；CI 增加 `tags: ['v*']` 触发 |
+| **v1.1.4** | 2026-09-20 | 修复界面版本号长期显示 `dev`：CI checkout 改 `fetch-depth: 0` + 版本号改 `git describe --tags --always`（tag 优先），本地构建统一走 `make build` 或带 `-ldflags` |
 | **v1.1.3** | 2026-09-20 | 修复横向打印纸张方向错误（横向 N 合 1 打成纵向、内容被裁切）：提交前用 Ghostscript 把横向作业旋转归一化为纵向 A4 再按 portrait 提交，预览仍显横向版面 |
 | **v1.1.2** | 2026-08-21 | 修复 docx / 手动转换 PDF 预览失败（"PDF 预览加载失败"）：PDF 专属分支走 Ghostscript 光栅化预览，彻底绕开 pdf.js |
 | **v1.1.1** | 2026-08-20 | 标准模式多页预览翻页（与发票一致，带「‹ 1 / N ›」翻页条）；修复加密 / 特殊结构 PDF 标准打印 / 预览只出 1 页（页数改由 Ghostscript 实际渲染决定） |
