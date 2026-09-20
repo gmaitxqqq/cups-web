@@ -248,6 +248,22 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 		defer printCleanup()
 	}
 
+	// 横向打印归一化：打印机 PPD（brlaser）没有 Orientation 选项，
+	// orientation-requested=4 不会传导到驱动，横向页面会被原样塞进纵向纸张
+	// 导致右侧内容被裁掉（Issue: 横向4合1打成纵向）。这里把内容旋转 90° 贴合到
+	// 纵向纸张，之后按 portrait 提交，打印机无需任何方向支持。
+	// 落库仍记录用户选择的 landscape，预览也保持横向版面。
+	printOrientation := orientation
+	if orientation == "landscape" && printMime == "application/pdf" {
+		if oriented, oerr := orientPDFForLandscapePrint(countCtx, printPath, paperSize); oerr == nil {
+			defer oriented.Cleanup()
+			printPath = oriented.OutputPath
+			printOrientation = "portrait"
+		} else {
+			log.Printf("[print] landscape normalize failed, keep original orientation: %v", oerr)
+		}
+	}
+
 	if watermarkText != "" && printMime == "application/pdf" {
 		wmPath, wmCleanup, wmErr := applyWatermarkToPDF(printPath, watermarkText)
 		if wmErr != nil {
@@ -358,7 +374,7 @@ func printHandler(w http.ResponseWriter, r *http.Request) {
 		IsDuplex:     isDuplex,
 		IsColor:      isColor,
 		Copies:       copies,
-		Orientation:  orientation,
+		Orientation:  printOrientation,
 		PaperSize:    paperSize,
 		PaperType:    paperType,
 		PrintScaling: printScaling,

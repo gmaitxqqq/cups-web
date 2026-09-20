@@ -447,6 +447,18 @@ func reprintHandler(w http.ResponseWriter, r *http.Request) {
 		defer printCleanup()
 	}
 
+	// 横向重打同样需要归一化（打印机 PPD 无 Orientation 选项），详见 pdf_landscape.go
+	printOrientation := req.Orientation
+	if req.Orientation == "landscape" && printMime == "application/pdf" {
+		if oriented, oerr := orientPDFForLandscapePrint(countCtx, printPath, req.PaperSize); oerr == nil {
+			defer oriented.Cleanup()
+			printPath = oriented.OutputPath
+			printOrientation = "portrait"
+		} else {
+			log.Printf("[reprint] landscape normalize failed, keep original orientation: %v", oerr)
+		}
+	}
+
 	if watermark := strings.TrimSpace(req.WatermarkText); watermark != "" && printMime == "application/pdf" {
 		wmPath, wmCleanup, wmErr := applyWatermarkToPDF(printPath, watermark)
 		if wmErr != nil {
@@ -538,7 +550,7 @@ func reprintHandler(w http.ResponseWriter, r *http.Request) {
 		IsDuplex:     req.Duplex,
 		IsColor:      req.Color,
 		Copies:       req.Copies,
-		Orientation:  req.Orientation,
+		Orientation:  printOrientation,
 		PaperSize:    req.PaperSize,
 		PaperType:    req.PaperType,
 		MediaSource:  req.MediaSource,

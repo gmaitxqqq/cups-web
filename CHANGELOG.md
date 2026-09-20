@@ -4,6 +4,17 @@
 
 ---
 
+## v1.1.3（2026-09-20，补丁）
+
+### 修复（Fixes）
+- **横向打印纸张方向错误（"横向 4 合 1 打成纵向"）**：根因为本部署打印机（Brother/brlaser 系驱动）的 PPD **没有 `*Orientation` 选项**，`orientation-requested-supported` 实际只有 3（portrait）。客户端提交的 `orientation-requested=4` 被 `pdftopdf` 直接忽略，横向页面（842×595pt）被原样塞进纵向纸张（595×842pt），右侧约 30% 内容跑出成像区被裁切（发票第二列消失），而 `print-scaling=none` 又阻止了任何缩放兜底。
+  修复后**不再依赖打印机的方向能力**：提交打印前用 Ghostscript 把「横向作业」归一化为「纵向 A4 纸张 + 内容旋转 90° 填满整页」（`cmd/server/pdf_landscape.go` 的 `orientPDFForLandscapePrint`，参数 `pdfwrite -dFIXEDMEDIA -dPDFFitPage -dAutoRotatePages=/None -c "<</Orientation 1>> setpagedevice"`），再按 portrait 提交。预览仍显示横向版面，出纸后横向摆放即得正确横向 2×2 效果。普通图片 / 文档 / 纵向版面的打印均不受影响。
+
+### 部署说明
+- 纯后端逻辑修复，前端未改动（前端 hash 仍为 `D48HY_Hb`）。生产机已通过本地交叉编译二进制替换部署验证；若走 GitHub Actions 自动构建，推 `master` 后 `:latest` 会同步更新，强刷浏览器即可。
+
+---
+
 ## v1.1.2（2026-08-21，补丁）
 
 ### 修复（Fixes）
