@@ -3,6 +3,7 @@ name: Build and Push Image
 on:
   push:
     branches: [master]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -43,6 +44,9 @@ jobs:
             type=raw,value=latest
             type=ref,event=branch
             type=sha,prefix=sha-,format=short
+            # 发版 tag（vX.Y.Z）推送时，额外给镜像打一个固定版本标签，便于 pin 版本，
+            # 避免只能依赖会漂移的 :latest。仅 tag 事件（github.ref_name 形如 v1.1.4）会匹配。
+            type=match,pattern=v\d+\.\d+\.\d+
 
       - name: Compute version (tag 优先，回退短 SHA)
         id: ver
