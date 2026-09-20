@@ -26,6 +26,9 @@ data/
 uploads/
 /server
 
+# 本地交叉编译产物（~47MB，部署时用 Docker COPY 进镜像，不入库）
+cups-web-linux
+
 # Go
 vendor/
 

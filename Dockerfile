@@ -81,10 +81,16 @@ FROM golang:1.26 AS builder
 WORKDIR /src
 
 # 构建期注入版本号（Issue #26）：
-#   - CI (docker-publish.yml) 会通过 `--build-arg VERSION=${{ github.ref_name }}` 传入
-#     形如 `v1.2.3` 的 tag 名；push master 分支时会传入分支名 `master`。
+#   - CI (.github/workflows/build.yml) checkout 时取全量 tag 历史（fetch-depth: 0），
+#     再用 `git describe --tags --always` 算出版本串透传进来：
+#       HEAD 恰好落在 tag 上 → `v1.1.3`
+#       领先 tag 若干提交     → `v1.1.3-N-g<sha>`
+#       仓库无 tag / git 不可用 → 短 commit SHA
 #   - 本地 `make docker-build` 会把 `git describe --tags --always --dirty` 透传进来。
 #   - 未指定时保持空字符串，让 main.Version 保持默认 "dev"，便于区分"未注入"与"注入失败"。
+#   - ⚠️ 手工 `go build` 若漏掉 -ldflags，页面就会显示 `dev`（本地曾因此长期无法判断
+#     自己跑的到底是哪个版本）。请用 `make build`，或显式传
+#     `-ldflags "-s -w -X main.Version=$(git describe --tags --always)"`。
 ARG VERSION=""
 
 # copy go modules and source

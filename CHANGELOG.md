@@ -4,6 +4,24 @@
 
 ---
 
+## v1.1.4（2026-09-20，补丁）
+
+### 修复（Fixes）
+- **界面版本号长期显示 `dev`，无法核对本地部署对应哪个 GitHub 版本**：根因为 `cmd/server/version.go` 的 `Version` 默认值是 `dev`，实际版本号依赖编译期 `-ldflags "-X main.Version=<ver>"` 注入；而手工执行的 `go build` 没有带该参数（`Makefile` 与 `Dockerfile` 都会自动注入，手工构建会漏），于是二进制里版本号始终是 `dev`。
+  修复后本地构建统一走 `make build`（或显式传 `-ldflags "-s -w -X main.Version=$(git describe --tags --always)"`），生产机已重新部署，`/api/version` 返回 `v1.1.x` 而非 `dev`。
+- **GitHub Actions 构建的镜像版本号只有短 commit SHA**：CI 原先把 `${GITHUB_SHA::7}` 作为 `--build-arg VERSION` 传入，且 `actions/checkout` 默认 `fetch-depth: 1` 拿不到 tag，因此镜像内版本号与「发布版本」对不上（看不出是 v1.1.3 还是别的）。
+  修复后 CI checkout 改为 `fetch-depth: 0`（取全量 tag 历史），版本号改用与 `Makefile` 同一套约定计算：`HEAD` 恰好落在 tag 上 → `v1.1.4`；领先 tag 若干提交 → `v1.1.4-N-g<sha>`；仓库无 tag 才回退短 SHA。
+
+### 改进（Improvements）
+- `.gitignore` 新增 `cups-web-linux`（本地交叉编译产物 ~47MB，部署时由 Docker `COPY` 进镜像，不应入库；此前未忽略还会让 Go build info 出现 `+dirty`）。
+- `Dockerfile` 中版本注入说明改为与 `.github/workflows/build.yml` 实际行为一致，并标注手工构建必须传 `-ldflags`。
+
+### 部署说明
+- 纯构建链路修复，Go 业务逻辑无改动，前端未改动（前端 hash 仍为 `D48HY_Hb`），无需强刷浏览器。
+- 重新部署后左上角版本号应由 `dev` 变为 `v1.1.4`；推 `master` 后 GitHub Actions 构建的 `:latest` 镜像版本号同样为 `v1.1.4`，两边可直接对照。
+
+---
+
 ## v1.1.3（2026-09-20，补丁）
 
 ### 修复（Fixes）
